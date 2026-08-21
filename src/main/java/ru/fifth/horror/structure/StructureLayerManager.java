@@ -10,6 +10,8 @@ import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.nbt.NbtCompound;
 import net.minecraft.nbt.StringNbtReader;
 import net.minecraft.registry.Registries;
+import net.minecraft.registry.RegistryKey;
+import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.state.property.Property;
@@ -35,16 +37,11 @@ public final class StructureLayerManager {
         capture(server, world, build, variant, group, defaultActive, restoreOnLoad, "default", 0, a, b);
     }
 
-    /** Backward-compatible overload: old floor data belongs to the default floor set. */
     public static void capture(MinecraftServer server, ServerWorld world, String build, String variant, String group,
                                boolean defaultActive, boolean restoreOnLoad, int floor, BlockPos a, BlockPos b) {
         capture(server, world, build, variant, group, defaultActive, restoreOnLoad, "default", floor, a, b);
     }
 
-    /**
-     * Stores a snapshot and optionally binds it to a floor inside a named floor set.
-     * floorSet normally equals LiftEntity#getLiftId(), so independent lifts may reuse floor numbers 1..9.
-     */
     public static void capture(MinecraftServer server, ServerWorld world, String build, String variant, String group,
                                boolean defaultActive, boolean restoreOnLoad, String floorSet, int floor,
                                BlockPos a, BlockPos b) {
@@ -65,12 +62,8 @@ public final class StructureLayerManager {
         snap.restoreOnLoad = restoreOnLoad;
         snap.floor = floor;
         snap.world = world.getRegistryKey().getValue().toString();
-        snap.minX = min.getX();
-        snap.minY = min.getY();
-        snap.minZ = min.getZ();
-        snap.maxX = max.getX();
-        snap.maxY = max.getY();
-        snap.maxZ = max.getZ();
+        snap.minX = min.getX(); snap.minY = min.getY(); snap.minZ = min.getZ();
+        snap.maxX = max.getX(); snap.maxY = max.getY(); snap.maxZ = max.getZ();
 
         for (BlockPos p : BlockPos.iterate(min, max)) {
             BlockState state = world.getBlockState(p);
@@ -98,30 +91,39 @@ public final class StructureLayerManager {
 
     public static boolean activate(MinecraftServer server, ServerWorld fallback, String build, String variant) {
         Snapshot s = load(server, safe(build), safe(variant));
-        if (s == null) return false;
-        return activateSnapshot(server, fallback, s, null);
+        return s != null && activateSnapshot(server, fallback, s, null);
     }
 
-    /** Restore a snapshot at another origin; useful when every floor uses one common lift-stage area. */
+    /** Restore a snapshot at an explicitly chosen minimum corner. */
     public static boolean activateAt(MinecraftServer server, ServerWorld fallback, String build, String variant, BlockPos targetOrigin) {
         Snapshot s = load(server, safe(build), safe(variant));
-        if (s == null) return false;
-        return activateSnapshot(server, fallback, s, targetOrigin);
+        return s != null && activateSnapshot(server, fallback, s, targetOrigin);
     }
 
     private static boolean activateSnapshot(MinecraftServer server, ServerWorld fallback, Snapshot s, BlockPos overrideOrigin) {
-        Identifier worldId = Identifier.tryParse(s.world);
-        ServerWorld world = worldId == null ? null : server.getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, worldId));
-        if (world == null) world = fallback;
+        /*
+         * A relocated stage always belongs to the caller's/fallback world. Previously the snapshot's source world
+         * won even when a target origin was supplied, so floors captured in a staging dimension could be pasted there
+         * instead of beside the actual lift.
+         */
+        ServerWorld world;
+        if (overrideOrigin != null) {
+            world = fallback;
+        } else {
+            Identifier worldId = Identifier.tryParse(s.world);
+            world = worldId == null ? null : server.getWorld(RegistryKey.of(RegistryKeys.WORLD, worldId));
+            if (world == null) world = fallback;
+        }
         if (world == null) return false;
 
-        String activeOld = getActiveVariant(server, s.build, s.group);
+        BlockPos origin = overrideOrigin == null ? new BlockPos(s.minX, s.minY, s.minZ) : overrideOrigin.toImmutable();
+        String activationKey = activationKey(s, world, overrideOrigin);
+        String activeOld = getActiveVariant(server, activationKey);
         if (activeOld != null && !activeOld.equals(s.variant)) {
             Snapshot old = load(server, s.build, activeOld);
-            if (old != null) clearSnapshot(world, old, overrideOrigin);
+            if (old != null) clearSnapshot(world, old, origin);
         }
 
-        BlockPos origin = overrideOrigin == null ? new BlockPos(s.minX, s.minY, s.minZ) : overrideOrigin;
         for (Cell c : s.cells) {
             BlockPos p = origin.add(c.x, c.y, c.z);
             Identifier id = Identifier.tryParse(c.block);
@@ -142,11 +144,10 @@ public final class StructureLayerManager {
                 } catch (Exception ignored) {}
             }
         }
-        setActiveVariant(server, s.build, s.group, s.variant);
+        setActiveVariant(server, activationKey, s.variant);
         return true;
     }
 
-    /** Legacy lookup for old maps that used one global 1..9 floor namespace. */
     public static Optional<Meta> findFloor(MinecraftServer server, int floor) {
         return findFloor(server, "default", floor);
     }
@@ -161,7 +162,6 @@ public final class StructureLayerManager {
                 .findFirst();
         if (exact.isPresent()) return exact;
 
-        // Migration path for worlds authored before floorSet existed.
         if (!"default".equals(wantedSet)) {
             return meta.stream()
                     .filter(m -> m.floor == wantedFloor && "default".equals(safeFloorSet(m.floorSet)))
@@ -174,9 +174,16 @@ public final class StructureLayerManager {
         return activateFloor(server, fallback, "default", floor, targetOrigin);
     }
 
+    /**
+     * targetOrigin == null means restore at the snapshot's captured origin.
+     * A non-null target is an explicit stage relocation and is scoped independently by world+origin.
+     */
     public static boolean activateFloor(MinecraftServer server, ServerWorld fallback, String floorSet, int floor, BlockPos targetOrigin) {
         Optional<Meta> m = findFloor(server, floorSet, floor);
-        return m.isPresent() && activateAt(server, fallback, m.get().build, m.get().variant, targetOrigin);
+        if (m.isEmpty()) return false;
+        return targetOrigin == null
+                ? activate(server, fallback, m.get().build, m.get().variant)
+                : activateAt(server, fallback, m.get().build, m.get().variant, targetOrigin);
     }
 
     public static void restoreDefaults(MinecraftServer server) {
@@ -184,14 +191,12 @@ public final class StructureLayerManager {
             if (!m.defaultActive || !m.restoreOnLoad) continue;
             Identifier worldId = Identifier.tryParse(m.world);
             if (worldId == null) continue;
-            ServerWorld world = server.getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD, worldId));
+            ServerWorld world = server.getWorld(RegistryKey.of(RegistryKeys.WORLD, worldId));
             if (world != null) activate(server, world, m.build, m.variant);
         }
     }
 
-    public static List<Meta> list(MinecraftServer server) {
-        return List.copyOf(readMeta(server));
-    }
+    public static List<Meta> list(MinecraftServer server) { return List.copyOf(readMeta(server)); }
 
     private static Snapshot load(MinecraftServer server, String build, String variant) {
         try {
@@ -204,21 +209,10 @@ public final class StructureLayerManager {
         }
     }
 
-    private static Path root(MinecraftServer server) {
-        return server.getSavePath(WorldSavePath.ROOT).resolve("fiven").resolve("structures");
-    }
-
-    private static Path file(MinecraftServer server, String build, String variant) {
-        return root(server).resolve(build).resolve(variant + ".json");
-    }
-
-    private static Path metaFile(MinecraftServer server) {
-        return root(server).resolve("layers.json");
-    }
-
-    private static Path activeFile(MinecraftServer server) {
-        return root(server).resolve("active.json");
-    }
+    private static Path root(MinecraftServer server) { return server.getSavePath(WorldSavePath.ROOT).resolve("fiven").resolve("structures"); }
+    private static Path file(MinecraftServer server, String build, String variant) { return root(server).resolve(build).resolve(variant + ".json"); }
+    private static Path metaFile(MinecraftServer server) { return root(server).resolve("layers.json"); }
+    private static Path activeFile(MinecraftServer server) { return root(server).resolve("active.json"); }
 
     private static String safe(String value) {
         String s = value == null ? "layer" : value.trim().toLowerCase(Locale.ROOT);
@@ -257,8 +251,7 @@ public final class StructureLayerManager {
         Files.writeString(metaFile(server), GSON.toJson(list, META_TYPE));
     }
 
-    private static void clearSnapshot(ServerWorld world, Snapshot s, BlockPos overrideOrigin) {
-        BlockPos origin = overrideOrigin == null ? new BlockPos(s.minX, s.minY, s.minZ) : overrideOrigin;
+    private static void clearSnapshot(ServerWorld world, Snapshot s, BlockPos origin) {
         int dx = s.maxX - s.minX;
         int dy = s.maxY - s.minY;
         int dz = s.maxZ - s.minZ;
@@ -267,19 +260,26 @@ public final class StructureLayerManager {
         }
     }
 
-    private static String getActiveVariant(MinecraftServer server, String build, String group) {
+    /** Legacy activations share build:group; relocated lift stages are isolated by destination world and origin. */
+    private static String activationKey(Snapshot s, ServerWorld world, BlockPos overrideOrigin) {
+        String base = s.build + ":" + s.group;
+        if (overrideOrigin == null) return base;
+        return base + "@" + world.getRegistryKey().getValue() + "|" + overrideOrigin.asLong();
+    }
+
+    private static String getActiveVariant(MinecraftServer server, String key) {
         try {
             Path p = activeFile(server);
             if (!Files.exists(p)) return null;
             Type t = new TypeToken<Map<String, String>>() {}.getType();
             Map<String, String> m = GSON.fromJson(Files.readString(p), t);
-            return m == null ? null : m.get(build + ":" + group);
+            return m == null ? null : m.get(key);
         } catch (Exception e) {
             return null;
         }
     }
 
-    private static void setActiveVariant(MinecraftServer server, String build, String group, String variant) {
+    private static void setActiveVariant(MinecraftServer server, String key, String variant) {
         try {
             Map<String, String> active = new LinkedHashMap<>();
             Path p = activeFile(server);
@@ -288,21 +288,17 @@ public final class StructureLayerManager {
                 Map<String, String> old = GSON.fromJson(Files.readString(p), t);
                 if (old != null) active.putAll(old);
             }
-            active.put(build + ":" + group, variant);
+            active.put(key, variant);
             Files.createDirectories(p.getParent());
             Files.writeString(p, GSON.toJson(active));
         } catch (Exception ignored) {}
     }
 
-    private static <T extends Comparable<T>> String valueName(BlockState state, Property<T> property) {
-        return property.name(state.get(property));
-    }
+    private static <T extends Comparable<T>> String valueName(BlockState state, Property<T> property) { return property.name(state.get(property)); }
 
     private static BlockState applyProperties(BlockState state, Map<String, String> values) {
         if (values == null) return state;
-        for (Property<?> p : state.getProperties()) {
-            if (values.containsKey(p.getName())) state = applyProperty(state, p, values.get(p.getName()));
-        }
+        for (Property<?> p : state.getProperties()) if (values.containsKey(p.getName())) state = applyProperty(state, p, values.get(p.getName()));
         return state;
     }
 
@@ -330,19 +326,12 @@ public final class StructureLayerManager {
         public String build, variant, group, world, floorSet;
         public boolean defaultActive, restoreOnLoad;
         public int floor;
-
         public Meta() {}
-
         public Meta(String build, String variant, String group, boolean defaultActive, boolean restoreOnLoad,
                     String world, String floorSet, int floor) {
-            this.build = build;
-            this.variant = variant;
-            this.group = group;
-            this.defaultActive = defaultActive;
-            this.restoreOnLoad = restoreOnLoad;
-            this.world = world;
-            this.floorSet = safeFloorSet(floorSet);
-            this.floor = floor;
+            this.build = build; this.variant = variant; this.group = group;
+            this.defaultActive = defaultActive; this.restoreOnLoad = restoreOnLoad;
+            this.world = world; this.floorSet = safeFloorSet(floorSet); this.floor = floor;
         }
     }
 }
