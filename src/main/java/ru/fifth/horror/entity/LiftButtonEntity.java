@@ -4,6 +4,8 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Box;
@@ -32,6 +34,7 @@ public final class LiftButtonEntity extends Entity implements GeoEntity {
     public ActionResult interact(PlayerEntity player, Hand hand) {
         if (!getWorld().isClient) {
             triggerAnim("main", "click");
+            getWorld().playSound(null, getBlockPos(), SoundEvents.BLOCK_STONE_BUTTON_CLICK_ON, SoundCategory.BLOCKS, 0.8f, 0.95f);
             Box area = getBoundingBox().expand(12.0);
             getWorld().getEntitiesByClass(LiftEntity.class, area, e -> e.isAlive()).stream()
                     .min(Comparator.comparingDouble(this::squaredDistanceTo))
