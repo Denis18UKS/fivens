@@ -5,8 +5,7 @@
   "compatibilityLevel": "JAVA_17",
   "refmap": "Fifth-Horror-Engine-refmap.json",
   "mixins": [
-    "MonsterForLiftHidingMixin",
-    "LiftManagerArrivalMixin"
+    "MonsterForLiftHidingMixin"
   ],
   "client": [
     "TitleScreenMixin",
