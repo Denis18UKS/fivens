@@ -11,7 +11,8 @@
       "ru.fifth.horror.FifthMod",
       "ru.fifth.horror.FivenExtraContent",
       "ru.fifth.horror.CursedLiftCommands",
-      "ru.fifth.horror.MflTestCommands"
+      "ru.fifth.horror.MflTestCommands",
+      "ru.fifth.horror.TvTestCommands"
     ],
     "client": ["ru.fifth.horror.client.FifthClient"]
   },
