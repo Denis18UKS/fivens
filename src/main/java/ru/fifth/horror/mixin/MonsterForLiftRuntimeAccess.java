@@ -7,7 +7,7 @@ import org.spongepowered.asm.mixin.gen.Invoker;
 import ru.fifth.horror.entity.MonsterForLiftEntity;
 
 /** Narrow server-side access used by the authored MFL runtime/test controller. */
-@Mixin(MonsterForLiftEntity.class)
+@Mixin(value = MonsterForLiftEntity.class, remap = false)
 public interface MonsterForLiftRuntimeAccess {
     @Accessor("manualAnimationTicks")
     int fiven$getManualAnimationTicks();
