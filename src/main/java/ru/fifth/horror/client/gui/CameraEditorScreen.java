@@ -13,15 +13,23 @@ import ru.fifth.horror.network.FifthNetworking;
 
 public class CameraEditorScreen extends HorrorScreen {
     private static final Gson GSON=new Gson();
-    private static CutsceneDefinition scene=new CutsceneDefinition();
     private final Screen parent;
+    private final CutsceneDefinition scene;
     private TextFieldWidget id,duration,fov,subtitle;
     private boolean hideHud=true,lock=true,teleportAtEnd=false;
     private String status="";
 
-    public CameraEditorScreen(Screen parent){super(Text.literal("ПЯТЫЙ / КАТСЦЕНЫ"));this.parent=parent;}
-    public CameraEditorScreen(Screen parent, CutsceneDefinition existing){super(Text.literal("ПЯТЫЙ / КАТСЦЕНЫ"));this.parent=parent;if(existing!=null)scene=existing;}
-    public static void setScene(CutsceneDefinition existing){if(existing!=null)scene=existing;}
+    public CameraEditorScreen(Screen parent){
+        super(Text.literal("ПЯТЫЙ / КАТСЦЕНЫ"));
+        this.parent=parent;
+        this.scene=new CutsceneDefinition();
+    }
+
+    public CameraEditorScreen(Screen parent, CutsceneDefinition existing){
+        super(Text.literal("ПЯТЫЙ / КАТСЦЕНЫ"));
+        this.parent=parent;
+        this.scene=existing==null?new CutsceneDefinition():GSON.fromJson(GSON.toJson(existing),CutsceneDefinition.class);
+    }
 
     @Override protected void init(){
         beginHorrorInit();

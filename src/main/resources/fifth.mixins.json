@@ -6,6 +6,7 @@
   "refmap": "Fifth-Horror-Engine-refmap.json",
   "client": [
     "TitleScreenMixin",
+    "MinecraftClientMixin",
     "CameraMixin",
     "InGameHudMixin",
     "GameRendererMixin",
