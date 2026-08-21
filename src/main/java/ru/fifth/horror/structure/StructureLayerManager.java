@@ -99,8 +99,22 @@ public final class StructureLayerManager {
         return readMeta(server).stream().filter(m -> m.floor == floor).findFirst();
     }
 
+    public static Optional<Meta> findFloor(MinecraftServer server, String liftId, int floor) {
+        String set = safe(liftId);
+        List<Meta> matches = readMeta(server).stream().filter(m -> m.floor == floor).toList();
+        Optional<Meta> exact = matches.stream().filter(m -> set.equals(m.build)).findFirst();
+        if (exact.isPresent()) return exact;
+        // Backward compatibility for old worlds: an unambiguous legacy floor is still usable.
+        return matches.size() == 1 ? Optional.of(matches.get(0)) : Optional.empty();
+    }
+
     public static boolean activateFloor(MinecraftServer server, ServerWorld fallback, int floor, BlockPos targetOrigin) {
         Optional<Meta> m = findFloor(server, floor);
+        return m.isPresent() && activateAt(server, fallback, m.get().build, m.get().variant, targetOrigin);
+    }
+
+    public static boolean activateFloor(MinecraftServer server, ServerWorld fallback, String liftId, int floor, BlockPos targetOrigin) {
+        Optional<Meta> m = findFloor(server, liftId, floor);
         return m.isPresent() && activateAt(server, fallback, m.get().build, m.get().variant, targetOrigin);
     }
 
@@ -128,8 +142,9 @@ public final class StructureLayerManager {
         catch (Exception e) { return new ArrayList<>(); }
     }
     private static void upsertMeta(MinecraftServer server, Meta meta) throws IOException {
-        List<Meta> list = readMeta(server); list.removeIf(m -> m.build.equals(meta.build) && m.variant.equals(meta.variant));
-        if (meta.floor > 0) list.removeIf(m -> m.floor == meta.floor);
+        List<Meta> list = readMeta(server);
+        list.removeIf(m -> m.build.equals(meta.build) && m.variant.equals(meta.variant));
+        if (meta.floor > 0) list.removeIf(m -> m.floor == meta.floor && m.build.equals(meta.build));
         list.add(meta); Files.createDirectories(metaFile(server).getParent()); Files.writeString(metaFile(server), GSON.toJson(list, META_TYPE));
     }
 
