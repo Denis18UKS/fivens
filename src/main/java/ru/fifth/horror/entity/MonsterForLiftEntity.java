@@ -24,6 +24,7 @@ import software.bernie.geckolib.core.animatable.instance.AnimatableInstanceCache
 import software.bernie.geckolib.core.animation.AnimatableManager;
 import software.bernie.geckolib.core.animation.AnimationController;
 import software.bernie.geckolib.core.animation.RawAnimation;
+import software.bernie.geckolib.core.object.PlayState;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
 import java.util.ArrayList;
@@ -87,7 +88,6 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
 
     @Override
     protected void initGoals() {
-        // Looking is harmless. Movement is controlled below so an idle MFL never wanders by itself.
         goalSelector.add(3, new LookAtEntityGoal(this, PlayerEntity.class, 14f));
         goalSelector.add(4, new LookAroundGoal(this));
     }
@@ -167,7 +167,7 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
         screamerCooldown = 100;
         manualAnimationTicks = 16;
         setCurrentAnimation("mfl_screamer");
-        triggerAnim("main", "screamer");
+        triggerAnim("action", "screamer");
         FifthNetworking.sendScreamer(player, 30, 1.15f);
         clearChase();
     }
@@ -176,7 +176,7 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
         getNavigation().stop();
         manualAnimationTicks = 16;
         setCurrentAnimation("mfl_screamer");
-        triggerAnim("main", "screamer");
+        triggerAnim("action", "screamer");
         if (viewer != null) FifthNetworking.sendScreamer(viewer, 30, 1.15f);
     }
 
@@ -299,14 +299,16 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
         getNavigation().stop();
         if (a.isBlank()) { manualAnimationTicks = 0; setCurrentAnimation("idle"); return; }
         switch (a) {
-            case "idle" -> { manualAnimationTicks = 80; setCurrentAnimation("idle"); triggerAnim("main", "idle_debug"); }
-            case "walking", "walk" -> { manualAnimationTicks = 80; setCurrentAnimation("walking"); triggerAnim("main", "walk_debug"); }
-            case "running", "run" -> { manualAnimationTicks = 80; setCurrentAnimation("run"); triggerAnim("main", "run_debug"); }
-            case "looking_left" -> { manualAnimationTicks = 100; setCurrentAnimation(a); triggerAnim("main", "look_left"); }
-            case "looking_right" -> { manualAnimationTicks = 100; setCurrentAnimation(a); triggerAnim("main", "look_right"); }
-            case "looking_backward" -> { manualAnimationTicks = 100; setCurrentAnimation(a); triggerAnim("main", "look_back"); }
-            case "mfl_screamer" -> { manualAnimationTicks = 16; setCurrentAnimation(a); triggerAnim("main", "screamer"); }
-            case "mfl_hand" -> { manualAnimationTicks = 50; setCurrentAnimation(a); triggerAnim("main", "hand"); }
+            // Locomotion loops are predicate-driven only. Never register/trigger them as looping triggerable animations:
+            // a loop trigger owns the GeckoLib controller forever and was the cause of Hunt movement visually sliding.
+            case "idle" -> { manualAnimationTicks = 80; setCurrentAnimation("idle"); }
+            case "walking", "walk" -> { manualAnimationTicks = 80; setCurrentAnimation("walking"); }
+            case "running", "run" -> { manualAnimationTicks = 80; setCurrentAnimation("run"); }
+            case "looking_left" -> { manualAnimationTicks = 100; setCurrentAnimation(a); triggerAnim("action", "look_left"); }
+            case "looking_right" -> { manualAnimationTicks = 100; setCurrentAnimation(a); triggerAnim("action", "look_right"); }
+            case "looking_backward" -> { manualAnimationTicks = 100; setCurrentAnimation(a); triggerAnim("action", "look_back"); }
+            case "mfl_screamer" -> { manualAnimationTicks = 16; setCurrentAnimation(a); triggerAnim("action", "screamer"); }
+            case "mfl_hand" -> { manualAnimationTicks = 50; setCurrentAnimation(a); triggerAnim("action", "hand"); }
             default -> { manualAnimationTicks = 120; setCurrentAnimation(a); }
         }
     }
@@ -322,16 +324,18 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
 
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
-        controllers.add(new AnimationController<>(this, "main", 3, state -> {
+        // The main controller is exclusively state/predicate driven. No looping triggerables are allowed here.
+        controllers.add(new AnimationController<>(this, "main", 2, state -> {
             String a = getCurrentAnimation();
             if (a == null || a.isBlank() || a.startsWith("looking_") || "mfl_screamer".equals(a) || "mfl_hand".equals(a)) return state.setAndContinue(IDLE);
             if ("idle".equals(a)) return state.setAndContinue(IDLE);
             if ("walking".equals(a) || "walk".equals(a)) return state.setAndContinue(WALKING);
             if ("run".equals(a) || "running".equals(a)) return state.setAndContinue(RUN);
             return state.setAndContinue(RawAnimation.begin().thenLoop(a));
-        }).triggerableAnim("idle_debug", IDLE)
-                .triggerableAnim("walk_debug", WALKING)
-                .triggerableAnim("run_debug", RUN)
+        }));
+
+        // One-shot body/head actions live on an independent controller, so they can never latch or suppress locomotion.
+        controllers.add(new AnimationController<>(this, "action", 1, state -> PlayState.STOP)
                 .triggerableAnim("look_left", LOOK_LEFT)
                 .triggerableAnim("look_right", LOOK_RIGHT)
                 .triggerableAnim("look_back", LOOK_BACK)
