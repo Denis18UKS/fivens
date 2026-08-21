@@ -67,12 +67,8 @@ public final class FifthClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(FifthNetworking.CUTSCENE_LIBRARY_PAYLOAD, (client, handler, buf, responseSender) -> {
             int n = buf.readVarInt();
             java.util.List<CutsceneLibraryScreen.Info> rows = new java.util.ArrayList<>();
-            for (int i = 0; i < n; i++) {
-                rows.add(new CutsceneLibraryScreen.Info(buf.readString(128), buf.readVarInt(), buf.readVarInt(), buf.readBoolean()));
-            }
-            client.execute(() -> {
-                if (client.currentScreen instanceof CutsceneLibraryScreen lib) lib.update(rows);
-            });
+            for (int i = 0; i < n; i++) rows.add(new CutsceneLibraryScreen.Info(buf.readString(128), buf.readVarInt(), buf.readVarInt(), buf.readBoolean()));
+            client.execute(() -> { if (client.currentScreen instanceof CutsceneLibraryScreen lib) lib.update(rows); });
         });
         ClientPlayNetworking.registerGlobalReceiver(FifthNetworking.CUTSCENE_EDIT_PAYLOAD, (client, handler, buf, responseSender) -> {
             String json = buf.readString(1_000_000);
@@ -92,9 +88,11 @@ public final class FifthClient implements ClientModInitializer {
             client.execute(() -> LiftTravelOverlay.finish(floor));
         });
         ClientPlayNetworking.registerGlobalReceiver(FifthNetworking.OPEN_LIFT_EDITOR, (client, handler, buf, responseSender) -> {
-            int id = buf.readVarInt(), floor = buf.readVarInt(), mask = buf.readVarInt();
+            int id = buf.readVarInt();
+            String liftId = buf.readString(64);
+            int floor = buf.readVarInt(), mask = buf.readVarInt();
             var stage = buf.readBlockPos();
-            client.execute(() -> client.setScreen(new LiftEditorScreen(client.currentScreen, id, floor, mask, stage)));
+            client.execute(() -> client.setScreen(new LiftEditorScreen(client.currentScreen, id, liftId, floor, mask, stage)));
         });
         ClientPlayNetworking.registerGlobalReceiver(FifthNetworking.ENTITY_EFFECT_SYNC, (client, handler, buf, responseSender) -> {
             var cfg = ru.fifth.horror.effect.EntityEffectManager.read(buf);
@@ -103,24 +101,17 @@ public final class FifthClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(FifthNetworking.NPC_LIBRARY_PAYLOAD, (client, handler, buf, responseSender) -> {
             int count = Math.min(2048, buf.readVarInt());
             java.util.List<ScriptComputerScreen.NpcInfo> rows = new java.util.ArrayList<>(count);
-            for (int i = 0; i < count; i++) {
-                rows.add(new ScriptComputerScreen.NpcInfo(buf.readUuid(), buf.readString(128), buf.readString(256),
-                        buf.readBoolean(), buf.readString(512), buf.readVarInt(), buf.readString(256)));
-            }
-            client.execute(() -> {
-                if (client.currentScreen instanceof ScriptComputerScreen screen) screen.updateNpcLibrary(rows);
-            });
+            for (int i = 0; i < count; i++) rows.add(new ScriptComputerScreen.NpcInfo(buf.readUuid(), buf.readString(128), buf.readString(256), buf.readBoolean(), buf.readString(512), buf.readVarInt(), buf.readString(256)));
+            client.execute(() -> { if (client.currentScreen instanceof ScriptComputerScreen screen) screen.updateNpcLibrary(rows); });
         });
 
         UseEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
             if (world.isClient && CutscenePlayback.lockInput()) return net.minecraft.util.ActionResult.PASS;
-            if (world.isClient && player.getStackInHand(hand).isOf(FifthMod.NPC_EDITOR_TOOL)
-                    && entity instanceof ru.fifth.horror.entity.DirectorNpcEntity npc) {
+            if (world.isClient && player.getStackInHand(hand).isOf(FifthMod.NPC_EDITOR_TOOL) && entity instanceof ru.fifth.horror.entity.DirectorNpcEntity npc) {
                 MinecraftClient.getInstance().setScreen(new NpcEditorScreen(MinecraftClient.getInstance().currentScreen, npc));
                 return net.minecraft.util.ActionResult.SUCCESS;
             }
-            if (world.isClient && player.getStackInHand(hand).isOf(FifthMod.MFL_EDITOR_TOOL)
-                    && entity instanceof ru.fifth.horror.entity.MonsterForLiftEntity mfl) {
+            if (world.isClient && player.getStackInHand(hand).isOf(FifthMod.MFL_EDITOR_TOOL) && entity instanceof ru.fifth.horror.entity.MonsterForLiftEntity mfl) {
                 MinecraftClient.getInstance().setScreen(new MflEditorScreen(MinecraftClient.getInstance().currentScreen, mfl));
                 return net.minecraft.util.ActionResult.SUCCESS;
             }
@@ -136,26 +127,11 @@ public final class FifthClient implements ClientModInitializer {
             var stack = player.getStackInHand(hand);
             if (CutscenePlayback.lockInput()) return TypedActionResult.pass(stack);
             MinecraftClient client = MinecraftClient.getInstance();
-            if (stack.isOf(FifthMod.NPC_CREATOR)) {
-                client.setScreen(new NpcCreatorScreen(client.currentScreen, -1, null));
-                return TypedActionResult.success(stack);
-            }
-            if (stack.isOf(FifthMod.CAMERA_TOOL)) {
-                client.setScreen(new CameraEditorScreen(client.currentScreen));
-                return TypedActionResult.success(stack);
-            }
-            if (stack.isOf(FifthMod.BUILD_LAYER_TOOL)) {
-                client.setScreen(new BuildLayerScreen(client.currentScreen, stack.copy()));
-                return TypedActionResult.success(stack);
-            }
-            if (stack.isOf(FifthMod.ENTITY_SHADER_TOOL)) {
-                client.setScreen(new EntityShaderScreen(client.currentScreen));
-                return TypedActionResult.success(stack);
-            }
-            if (stack.isOf(FifthMod.CUTSCENE_LIBRARY_TOOL)) {
-                client.setScreen(new CutsceneLibraryScreen(client.currentScreen));
-                return TypedActionResult.success(stack);
-            }
+            if (stack.isOf(FifthMod.NPC_CREATOR)) { client.setScreen(new NpcCreatorScreen(client.currentScreen, -1, null)); return TypedActionResult.success(stack); }
+            if (stack.isOf(FifthMod.CAMERA_TOOL)) { client.setScreen(new CameraEditorScreen(client.currentScreen)); return TypedActionResult.success(stack); }
+            if (stack.isOf(FifthMod.BUILD_LAYER_TOOL)) { client.setScreen(new BuildLayerScreen(client.currentScreen, stack.copy())); return TypedActionResult.success(stack); }
+            if (stack.isOf(FifthMod.ENTITY_SHADER_TOOL)) { client.setScreen(new EntityShaderScreen(client.currentScreen)); return TypedActionResult.success(stack); }
+            if (stack.isOf(FifthMod.CUTSCENE_LIBRARY_TOOL)) { client.setScreen(new CutsceneLibraryScreen(client.currentScreen)); return TypedActionResult.success(stack); }
             if (stack.isOf(FifthMod.TV_LINK_TOOL) && stack.getNbt() != null && stack.getNbt().contains("FivenTvPos")) {
                 var pos = net.minecraft.util.math.BlockPos.fromLong(stack.getNbt().getLong("FivenTvPos"));
                 if (client.world != null && client.world.getBlockEntity(pos) instanceof ru.fifth.horror.block.TelevisionBlockEntity tv) {
@@ -166,7 +142,6 @@ public final class FifthClient implements ClientModInitializer {
             return TypedActionResult.pass(stack);
         });
 
-        // No visible developer key binding: the studio is intentionally reachable only from the secret elevator hotspot.
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
             LiftTravelOverlay.render(drawContext);
             VhsPlayback.render(drawContext);
