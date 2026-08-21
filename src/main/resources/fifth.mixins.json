@@ -14,6 +14,7 @@
     "CameraMixin",
     "CameraAccessor",
     "MinecraftClientFramebufferAccessor",
+    "WorldRendererVhsAccessor",
     "TelevisionRenderDispatcherMixin",
     "InGameHudMixin",
     "GameRendererMixin",
