@@ -6,6 +6,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.Framebuffer;
 import net.minecraft.client.gl.SimpleFramebuffer;
 import net.minecraft.client.render.Camera;
+import net.minecraft.client.render.Frustum;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
 import net.minecraft.client.util.math.MatrixStack;
@@ -13,23 +14,21 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.RotationAxis;
 import org.joml.Matrix4f;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import ru.fifth.horror.block.TelevisionBlockEntity;
 import ru.fifth.horror.mixin.CameraAccessor;
 import ru.fifth.horror.mixin.MinecraftClientFramebufferAccessor;
+import ru.fifth.horror.mixin.WorldRendererVhsAccessor;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-/**
- * Real off-screen world renderer for VHS playback.
- *
- * The important isolation rule is that MinecraftClient.framebuffer itself is temporarily swapped to the VHS
- * framebuffer. WorldRenderer has internal passes that call client.getFramebuffer(); merely binding another OpenGL
- * framebuffer is not enough and caused recorded-camera output to leak into the player's normal world render.
- */
+/** Real secondary-camera renderer for recorded VHS frames shown only on physical TV screens. */
 public final class VhsWorldCapture {
+    private static final Logger LOGGER = LoggerFactory.getLogger("Fiven/VHS");
     private static final int WIDTH = 256;
     private static final int HEIGHT = 144;
     private static final Map<Long, Capture> CAPTURES = new HashMap<>();
@@ -64,7 +63,6 @@ public final class VhsWorldCapture {
             Capture capture = CAPTURES.computeIfAbsent(key, ignored -> new Capture());
             if (capture.lastSessionTick == session.ticks()) continue;
 
-            // A broken GPU/driver path must degrade to TelevisionRenderer's in-screen fallback, never corrupt gameplay.
             if (capture.failures >= 5 && session.ticks() % 20 != 0) {
                 capture.lastSessionTick = session.ticks();
                 continue;
@@ -103,7 +101,18 @@ public final class VhsWorldCapture {
             matrices.multiply(RotationAxis.POSITIVE_X.rotationDegrees(camera.getPitch()));
             matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(camera.getYaw() + 180.0f));
 
-            // Critical: make every renderer path that asks MinecraftClient for its framebuffer receive scratch.
+            /*
+             * WorldRenderer normally prepares its frustum/terrain from the player's camera before render().
+             * A secondary VHS camera must do this again; otherwise it reuses player-camera visibility and the
+             * framebuffer can contain only empty/fallback imagery even though the recorded keyframes are valid.
+             */
+            client.worldRenderer.setupFrustum(matrices, camera.getPos(), projection);
+            WorldRendererVhsAccessor worldAccess = (WorldRendererVhsAccessor) (Object) client.worldRenderer;
+            Frustum vhsFrustum = worldAccess.fiven$getFrustum();
+            if (vhsFrustum != null) {
+                worldAccess.fiven$setupTerrain(camera, vhsFrustum, false, client.player.isSpectator());
+            }
+
             framebufferAccess.fiven$setFramebuffer(scratch);
             framebufferSwapped = true;
             scratch.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -134,11 +143,7 @@ public final class VhsWorldCapture {
             scratch.endWrite();
 
             NativeImage image = readFramebuffer();
-            if (image == null) {
-                capture.lastSessionTick = session.ticks();
-                capture.failures++;
-                return;
-            }
+            if (image == null) throw new IllegalStateException("Could not read VHS framebuffer");
             applyVhs(image, client, key, session.ticks());
             installTexture(client, key, capture, image);
             capture.lastSessionTick = session.ticks();
@@ -146,6 +151,10 @@ public final class VhsWorldCapture {
         } catch (Throwable error) {
             capture.lastSessionTick = session.ticks();
             capture.failures++;
+            if (capture.failures <= 3) {
+                LOGGER.warn("VHS secondary-camera capture failed for TV {} (attempt {}). TV will keep an in-screen fallback.",
+                        BlockPos.fromLong(key), capture.failures, error);
+            }
         } finally {
             if (lightmap) {
                 try { client.gameRenderer.getLightmapTextureManager().disable(); } catch (Throwable ignored) {}
@@ -154,8 +163,6 @@ public final class VhsWorldCapture {
                 try { modelView.pop(); RenderSystem.applyModelViewMatrix(); } catch (Throwable ignored) {}
             }
             try { RenderSystem.setProjectionMatrix(oldProjection, oldSorter); } catch (Throwable ignored) {}
-
-            // Restore the player's target before any later HUD/world pass can run.
             if (framebufferSwapped) {
                 try { framebufferAccess.fiven$setFramebuffer(originalFramebuffer); } catch (Throwable ignored) {}
             }
@@ -167,7 +174,7 @@ public final class VhsWorldCapture {
     private static void ensureFramebuffer() {
         if (scratch == null) {
             scratch = new SimpleFramebuffer(WIDTH, HEIGHT, true, false);
-            scratch.setTexFilter(9729); // GL_LINEAR: deliberately soft VHS upscale on the CRT surface.
+            scratch.setTexFilter(9729);
             return;
         }
         if (scratch.textureWidth != WIDTH || scratch.textureHeight != HEIGHT) scratch.resize(WIDTH, HEIGHT, false);
@@ -216,7 +223,6 @@ public final class VhsWorldCapture {
                 int b = (abgr >>> 16) & 255;
                 int g = (abgr >>> 8) & 255;
                 int r = abgr & 255;
-
                 if (mono) {
                     int grey = (r * 30 + g * 59 + b * 11) / 100;
                     r = g = b = grey;
