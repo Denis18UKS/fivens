@@ -4,6 +4,7 @@ import com.mojang.brigadier.arguments.DoubleArgumentType;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
 import net.minecraft.item.BlockItem;
@@ -17,10 +18,12 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 import ru.fifth.horror.block.ClockArmsBlock;
 import ru.fifth.horror.block.LiftBlockEntity;
 import ru.fifth.horror.effect.EntityEffectManager;
+import ru.fifth.horror.entity.DirectorNpcEntity;
 import ru.fifth.horror.entity.MflHidingManager;
 import ru.fifth.horror.item.MflHidingToolItem;
 import ru.fifth.horror.lift.LiftManager;
@@ -28,6 +31,8 @@ import ru.fifth.horror.network.FifthNetworking;
 
 /** Extra director utilities kept separate from the stable core bootstrap. */
 public final class FivenExtraContent implements ModInitializer {
+    public static final Identifier SAVE_NPC_TEXTURE = FifthMod.id("save_npc_texture");
+
     public static final Block CLOCK_ARMS = Registry.register(Registries.BLOCK, FifthMod.id("clock_arms"),
             new ClockArmsBlock(AbstractBlock.Settings.create().strength(1.2f).nonOpaque()));
     public static final Item CLOCK_ARMS_ITEM = Registry.register(Registries.ITEM, FifthMod.id("clock_arms"),
@@ -41,7 +46,30 @@ public final class FivenExtraContent implements ModInitializer {
             entries.add(CLOCK_ARMS_ITEM);
             entries.add(MFL_HIDING_TOOL);
         });
+        registerTextureNetworking();
         registerCommands();
+    }
+
+    private static void registerTextureNetworking() {
+        ServerPlayNetworking.registerGlobalReceiver(SAVE_NPC_TEXTURE, (server, player, handler, buf, responseSender) -> {
+            int entityId = buf.readVarInt();
+            String pngBase64 = buf.readString(65535);
+            server.execute(() -> {
+                if (!player.hasPermissionLevel(2)) return;
+                if (!(player.getWorld().getEntityById(entityId) instanceof DirectorNpcEntity npc)) return;
+                try {
+                    byte[] decoded = java.util.Base64.getDecoder().decode(pngBase64);
+                    if (decoded.length < 16 || decoded.length > 131072) {
+                        player.sendMessage(Text.literal("§8[§cFiven§8] §cPNG-текстура отклонена: неверный размер."), true);
+                        return;
+                    }
+                    npc.setSkinBase64(pngBase64);
+                    player.sendMessage(Text.literal("§8[§cFiven§8] §aPNG-текстура NPC сохранена."), true);
+                } catch (IllegalArgumentException e) {
+                    player.sendMessage(Text.literal("§8[§cFiven§8] §cPNG-текстура отклонена: повреждённые данные."), true);
+                }
+            });
+        });
     }
 
     private static void registerCommands() {
