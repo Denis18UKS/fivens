@@ -61,6 +61,14 @@ public final class VhsWorldCapture {
             if (session == null || !session.recordingPhase()) continue;
             Capture capture = CAPTURES.computeIfAbsent(key, ignored -> new Capture());
             if (capture.lastSessionTick == session.ticks()) continue;
+
+            // If a particular GPU/driver rejects recursive WorldRenderer capture, keep the safe fallback and
+            // retry only once per second instead of hammering the render loop every frame.
+            if (capture.failures >= 5 && session.ticks() % 20 != 0) {
+                capture.lastSessionTick = session.ticks();
+                continue;
+            }
+
             cursor = (cursor + checked + 1) % Math.max(1, active.size());
             render(client, key, session, tickDelta, capture);
             return;
@@ -119,14 +127,19 @@ public final class VhsWorldCapture {
             scratch.endWrite();
 
             NativeImage image = readFramebuffer();
-            if (image == null) return;
+            if (image == null) {
+                capture.lastSessionTick = session.ticks();
+                capture.failures++;
+                return;
+            }
             applyVhs(image, client, key, session.ticks());
             installTexture(client, key, capture, image);
             capture.lastSessionTick = session.ticks();
-            capture.failed = false;
+            capture.failures = 0;
         } catch (Throwable error) {
             // TV playback has a renderer fallback; a bad GPU/driver path must never take down the game client.
-            capture.failed = true;
+            capture.lastSessionTick = session.ticks();
+            capture.failures++;
         } finally {
             if (lightmap) {
                 try { client.gameRenderer.getLightmapTextureManager().disable(); } catch (Throwable ignored) {}
@@ -237,6 +250,6 @@ public final class VhsWorldCapture {
         private NativeImageBackedTexture texture;
         private Identifier id;
         private int lastSessionTick = Integer.MIN_VALUE;
-        private boolean failed;
+        private int failures;
     }
 }
