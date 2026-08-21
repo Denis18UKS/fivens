@@ -10,7 +10,8 @@
     "main": [
       "ru.fifth.horror.FifthMod",
       "ru.fifth.horror.FivenExtraContent",
-      "ru.fifth.horror.CursedLiftCommands"
+      "ru.fifth.horror.CursedLiftCommands",
+      "ru.fifth.horror.MflTestCommands"
     ],
     "client": ["ru.fifth.horror.client.FifthClient"]
   },
