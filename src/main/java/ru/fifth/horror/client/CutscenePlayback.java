@@ -13,26 +13,49 @@ public final class CutscenePlayback {
     private static CutsceneDefinition scene;
     private static int tick;
     private static int lastSubtitleIndex=-1;
+    private static boolean previousHudHidden;
+    private static boolean hudStateCaptured;
+
     private CutscenePlayback() {}
-    public static void start(CutsceneDefinition s){scene=s;tick=0;lastSubtitleIndex=-1;MinecraftClient c=MinecraftClient.getInstance();if(c.options!=null&&s!=null&&s.hideHud)c.options.hudHidden=true;}
-    public static void stop(){MinecraftClient c=MinecraftClient.getInstance();if(c.options!=null)c.options.hudHidden=false;scene=null;tick=0;lastSubtitleIndex=-1;}
+
+    public static void start(CutsceneDefinition s){
+        if(active())stop();
+        scene=s;tick=0;lastSubtitleIndex=-1;
+        MinecraftClient c=MinecraftClient.getInstance();
+        if(c.options!=null){previousHudHidden=c.options.hudHidden;hudStateCaptured=true;if(s!=null&&s.hideHud)c.options.hudHidden=true;}
+    }
+
+    public static void stop(){
+        restoreHud();
+        scene=null;tick=0;lastSubtitleIndex=-1;
+    }
+
     private static void finish(){
         CutsceneDefinition finished=scene;
         MinecraftClient c=MinecraftClient.getInstance();
-        if(c.options!=null)c.options.hudHidden=false;
+        restoreHud();
         scene=null;tick=0;lastSubtitleIndex=-1;
         if(finished!=null&&finished.teleportPlayerAtEnd&&finished.id!=null&&!finished.id.isBlank()&&c.getNetworkHandler()!=null){
             PacketByteBuf out=PacketByteBufs.create();out.writeString(finished.id,128);ClientPlayNetworking.send(FifthNetworking.CUTSCENE_END_TELEPORT,out);
         }
     }
+
+    private static void restoreHud(){
+        MinecraftClient c=MinecraftClient.getInstance();
+        if(hudStateCaptured&&c.options!=null)c.options.hudHidden=previousHudHidden;
+        hudStateCaptured=false;
+    }
+
     public static boolean active(){return scene!=null&&!scene.keyframes.isEmpty();}
     public static boolean hideHud(){return active()&&scene.hideHud;}
     public static boolean lockInput(){return active()&&scene.lockInput;}
+
     public static void tick(){
         if(!active())return;tick++;Sample s=sample(0);
         if(s!=null&&s.index!=lastSubtitleIndex){lastSubtitleIndex=s.index;String text=scene.keyframes.get(s.index).subtitle;if(text!=null&&!text.isBlank()&&MinecraftClient.getInstance().inGameHud!=null)MinecraftClient.getInstance().inGameHud.setOverlayMessage(Text.literal(text),false);}
         if(tick>=totalTicks())finish();
     }
+
     public static Sample sample(float delta){
         if(!active())return null;int cursor=0;
         if(scene.keyframes.size()==1){var k=scene.keyframes.get(0);return new Sample(k.x,k.y,k.z,k.yaw,k.pitch,k.fov,0);}
@@ -43,6 +66,7 @@ public final class CutscenePlayback {
         }
         var k=scene.keyframes.get(scene.keyframes.size()-1);return new Sample(k.x,k.y,k.z,k.yaw,k.pitch,k.fov,scene.keyframes.size()-1);
     }
+
     private static float lerpAngle(float t,float a,float b){return a+MathHelper.wrapDegrees(b-a)*t;}
     private static int totalTicks(){int n=0;for(int i=0;i<scene.keyframes.size()-1;i++)n+=Math.max(1,scene.keyframes.get(i).durationTicks);return Math.max(1,n+1);}
     public record Sample(double x,double y,double z,float yaw,float pitch,double fov,int index){}
