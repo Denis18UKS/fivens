@@ -1,0 +1,7 @@
+{
+  "format_version": "1.12.0",
+  "minecraft:geometry": [{
+    "description": {"identifier":"geometry.unknown","texture_width":64,"texture_height":64,"visible_bounds_width":2,"visible_bounds_height":1.5,"visible_bounds_offset":[0,0.25,0]},
+    "bones": [{"name":"caseta","pivot":[0.5,0.52704,-0.01583],"cubes":[{"origin":[-5,0.02704,-3.01583],"size":[11,1,6],"uv":[0,0]}]}]
+  }]
+}
