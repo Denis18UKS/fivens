@@ -31,5 +31,7 @@
   "item.fiven.lift_editor_tool": "Редактор лифта и этажей",
   "item.fiven.entity_shader_tool": "Шейдеры сущностей",
   "entity.fiven.lift_panel": "Панель лифта",
-  "item.fiven.cutscene_library_tool": "Библиотека катсцен"
+  "item.fiven.cutscene_library_tool": "Библиотека катсцен",
+  "block.fiven.clock_arms": "Стрелки часов",
+  "item.fiven.clock_arms": "Стрелки часов"
 }
