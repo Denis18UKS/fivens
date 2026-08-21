@@ -12,7 +12,6 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.WorldSavePath;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -38,7 +37,7 @@ public final class LiftManager {
 
     public static void load(MinecraftServer server) {
         if (loadedServer == server) return;
-        loadedServer = server; BUTTONS.clear();
+        loadedServer = server; BUTTONS.clear(); RIDES.clear();
         try {
             Path p = bindingsFile(server);
             if (Files.exists(p)) {
@@ -50,6 +49,8 @@ public final class LiftManager {
 
     public static void bindButton(MinecraftServer server, ServerWorld world, BlockPos pos, UUID liftUuid, int floor) {
         load(server); floor = clampFloor(floor);
+        LiftEntity lift=findLift(server,liftUuid);
+        if(lift==null||!lift.canOpenOnFloor(floor))return;
         BUTTONS.put(key(world, pos), new ButtonBinding(liftUuid.toString(), floor));
         save(server);
     }
@@ -58,16 +59,20 @@ public final class LiftManager {
         load(server); return BUTTONS.get(key(world, pos));
     }
 
+    /**
+     * Fires Fiven's lift action but deliberately returns false so UseBlockCallback returns PASS.
+     * This keeps the vanilla stone-button click animation, sound and redstone behavior intact.
+     */
     public static boolean callBoundButton(ServerPlayerEntity player, BlockPos pos) {
         ButtonBinding binding = getBinding(player.getServer(), player.getServerWorld(), pos);
         if (binding == null) return false;
         LiftEntity lift = findLift(player.getServer(), binding.liftUuid());
         if (lift == null) {
             player.sendMessage(Text.literal("§8[§cFiven§8] §7Привязанный лифт не найден."), true);
-            return true;
+            return false;
         }
         travel(player, lift, binding.floor());
-        return true;
+        return false;
     }
 
     public static LiftEntity nearestLift(ServerPlayerEntity player, double radius) {
@@ -81,6 +86,7 @@ public final class LiftManager {
     }
 
     public static LiftEntity findLift(MinecraftServer server, UUID uuid) {
+        if(server==null||uuid==null)return null;
         for (ServerWorld world : server.getWorlds()) {
             var e = world.getEntity(uuid);
             if (e instanceof LiftEntity lift) return lift;
@@ -91,18 +97,25 @@ public final class LiftManager {
     public static boolean travel(ServerPlayerEntity initiator, LiftEntity lift, int targetFloor) {
         targetFloor = clampFloor(targetFloor);
         if (lift == null || lift.getWorld().isClient) return false;
+        if (!lift.canOpenOnFloor(targetFloor)) {
+            if(initiator!=null){
+                initiator.playSound(SoundEvents.BLOCK_IRON_DOOR_CLOSE,0.8f,0.55f);
+                initiator.sendMessage(Text.literal("§8[§cFiven§8] §7Этаж §c"+targetFloor+" §7недоступен: кнопка сожжена."),true);
+            }
+            return false;
+        }
         int from = lift.getCurrentFloor();
         if (from == targetFloor) {
-            if (lift.canOpenOnFloor(targetFloor)) lift.playDoors();
-            else initiator.playSound(SoundEvents.BLOCK_IRON_DOOR_CLOSE, 0.8f, 0.55f);
+            lift.playDoors();
             return true;
         }
         int ticks = Math.max(40, Math.abs(targetFloor - from) * 32);
         lift.setTargetFloor(targetFloor);
-        Ride ride = new Ride(lift.getUuid(), initiator.getUuid(), from, targetFloor, ticks, ticks);
+        UUID playerUuid=initiator==null?new UUID(0L,0L):initiator.getUuid();
+        Ride ride = new Ride(lift.getUuid(), playerUuid, from, targetFloor, ticks, ticks);
         RIDES.put(lift.getUuid(), ride);
         sendRideStart(lift, from, targetFloor, ticks);
-        initiator.playSound(SoundEvents.BLOCK_PISTON_EXTEND, 0.55f, 0.45f);
+        if(initiator!=null)initiator.playSound(SoundEvents.BLOCK_PISTON_EXTEND, 0.55f, 0.45f);
         return true;
     }
 
@@ -114,43 +127,45 @@ public final class LiftManager {
             Ride r = en.getValue();
             LiftEntity lift = findLift(server, r.liftUuid);
             if (lift == null) { it.remove(); continue; }
+            ServerPlayerEntity p = new UUID(0L,0L).equals(r.playerUuid)?null:server.getPlayerManager().getPlayer(r.playerUuid);
+            if(!lift.canOpenOnFloor(r.toFloor)){
+                lift.setTargetFloor(lift.getCurrentFloor());
+                if(p!=null)p.sendMessage(Text.literal("§8[§cFiven§8] §7Поездка отменена: этаж §c"+r.toFloor+" §7стал недоступен."),true);
+                sendRideEnd(lift,lift.getCurrentFloor());
+                it.remove();
+                continue;
+            }
             int left = r.remaining - 1;
             if (left > 0) { en.setValue(r.withRemaining(left)); continue; }
             ServerWorld world = (ServerWorld) lift.getWorld();
             int floor = r.toFloor;
             BlockPos origin = lift.getStageOrigin();
-            boolean restored = StructureLayerManager.activateFloor(server, world, floor, origin);
+            boolean restored = StructureLayerManager.activateFloor(server, world, lift.getLiftId(), floor, origin);
             lift.setCurrentFloor(floor); lift.setTargetFloor(floor);
-            ServerPlayerEntity p = server.getPlayerManager().getPlayer(r.playerUuid);
             if (p != null) {
                 p.playSound(restored ? SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value() : SoundEvents.BLOCK_IRON_DOOR_CLOSE, 0.8f, restored ? 0.9f : 0.55f);
-                if (!restored) p.sendMessage(Text.literal("§8[§cFiven§8] §7Для этажа §c"+floor+" §7не найден сохранённый слой."), true);
+                if (!restored) p.sendMessage(Text.literal("§8[§cFiven§8] §7Для лифта §f"+lift.getLiftId()+"§7, этаж §c"+floor+" §7не найден сохранённый слой."), true);
             }
-            if (lift.canOpenOnFloor(floor) && restored) lift.playDoors();
-            else if (p != null) p.sendMessage(Text.literal("§8[§cFiven§8] §7Лифт приехал на §c"+floor+"§7, но двери заблокированы."), true);
+            if (restored) lift.playDoors();
             sendRideEnd(lift, floor);
             it.remove();
         }
     }
 
     private static void sendRideStart(LiftEntity lift, int from, int to, int ticks) {
-        PacketByteBuf buf = PacketByteBufs.create();
-        buf.writeVarInt(from); buf.writeVarInt(to); buf.writeVarInt(ticks);
-        for (ServerPlayerEntity p : PlayerLookup.tracking(lift)) {
+        Set<ServerPlayerEntity> recipients=new LinkedHashSet<>(PlayerLookup.tracking(lift));
+        if (lift.getWorld() instanceof ServerWorld sw) recipients.addAll(sw.getPlayers(pl -> pl.squaredDistanceTo(lift) < 64.0));
+        for(ServerPlayerEntity p:recipients){
             PacketByteBuf copy = PacketByteBufs.create(); copy.writeVarInt(from); copy.writeVarInt(to); copy.writeVarInt(ticks);
             ServerPlayNetworking.send(p, FifthNetworking.LIFT_TRAVEL_START, copy);
-        }
-        if (lift.getWorld() instanceof ServerWorld sw) {
-            for (ServerPlayerEntity p : sw.getPlayers(pl -> pl.squaredDistanceTo(lift) < 64.0)) {
-                PacketByteBuf copy = PacketByteBufs.create(); copy.writeVarInt(from); copy.writeVarInt(to); copy.writeVarInt(ticks);
-                ServerPlayNetworking.send(p, FifthNetworking.LIFT_TRAVEL_START, copy);
-            }
         }
     }
 
     private static void sendRideEnd(LiftEntity lift, int floor) {
         if (!(lift.getWorld() instanceof ServerWorld sw)) return;
-        for (ServerPlayerEntity p : sw.getPlayers(pl -> pl.squaredDistanceTo(lift) < 64.0)) {
+        Set<ServerPlayerEntity> recipients=new LinkedHashSet<>(PlayerLookup.tracking(lift));
+        recipients.addAll(sw.getPlayers(pl -> pl.squaredDistanceTo(lift) < 64.0));
+        for (ServerPlayerEntity p : recipients) {
             PacketByteBuf out = PacketByteBufs.create(); out.writeVarInt(floor); ServerPlayNetworking.send(p, FifthNetworking.LIFT_TRAVEL_END, out);
         }
     }
