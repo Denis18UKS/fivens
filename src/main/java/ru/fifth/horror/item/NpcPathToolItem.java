@@ -1,5 +1,6 @@
 package ru.fifth.horror.item;
 
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
@@ -9,10 +10,11 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
-import net.minecraft.util.math.Box;
+import net.minecraft.util.TypeFilter;
 import net.minecraft.util.math.Vec3d;
 import ru.fifth.horror.entity.DirectorNpcEntity;
 
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,8 +36,6 @@ public class NpcPathToolItem extends Item {
 
         Selection selection = new Selection(npc.getUuid(), npc.getNpcId());
         SELECTIONS.put(user.getUuid(), selection);
-
-        // Write to both references deliberately. In creative mode the stack argument can be replaced during inventory sync.
         remember(stack, selection);
         remember(user.getStackInHand(hand), selection);
         user.sendMessage(Text.literal("§8[§cПятый§8] §7NPC маршрута: §f" + npc.getNpcId() + " §8(выбор сохранён)"), true);
@@ -56,7 +56,6 @@ public class NpcPathToolItem extends Item {
             return ActionResult.FAIL;
         }
 
-        // Restore NBT if a creative/inventory sync replaced the original stack.
         remember(stack, selection);
         SELECTIONS.put(player.getUuid(), selection);
 
@@ -95,9 +94,10 @@ public class NpcPathToolItem extends Item {
     private static DirectorNpcEntity resolve(ServerWorld world, Selection selection) {
         if (world.getEntity(selection.uuid) instanceof DirectorNpcEntity npc) return npc;
         if (selection.npcId == null || selection.npcId.isBlank()) return null;
-        Box all = new Box(-30_000_000, -2048, -30_000_000, 30_000_000, 4096, 30_000_000);
-        var list = world.getEntitiesByClass(DirectorNpcEntity.class, all, n -> selection.npcId.equals(n.getNpcId()));
-        return list.isEmpty() ? null : list.get(0);
+        TypeFilter<Entity,DirectorNpcEntity> filter=TypeFilter.instanceOf(DirectorNpcEntity.class);
+        var result=new ArrayList<DirectorNpcEntity>(1);
+        world.collectEntitiesByType(filter,n -> selection.npcId.equals(n.getNpcId()),result,1);
+        return result.isEmpty()?null:result.get(0);
     }
 
     private static String fmt(Vec3d p) {
