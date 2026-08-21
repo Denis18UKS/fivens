@@ -9,18 +9,28 @@ Fabric 1.20.1 toolkit for building cinematic multiplayer horror maps directly in
 - GeckoLib model/animation resource fields and automatic animation discovery on resource reload.
 - NPC path authoring tool with persistent NPC selection and indexed runtime lookup.
 - FifthScript sandbox computer with PHP-like commands for NPC AI, triggers and layers.
-- Cutscene camera keyframes, FOV, subtitles, HUD/control lock and optional end teleport.
+- Cutscene camera keyframes, FOV, subtitles, HUD/control lock, optional end teleport and VHS cassette creation.
 - Cutscene library + VHS recording/playback with post-processing and fallback scanlines.
 - Structure snapshot variants/layers with default-active, restore-on-load and replacement groups.
-- Independent lift floor sets keyed by `liftId:floor`, with per-floor door permissions.
+- Physical lift `Block + BlockEntity`, wall-mounted floor panels, independent floor sets keyed by `liftId:floor`, and per-floor door permissions.
+- World-space entity horror effects, MFL animation editor, animation conditions and screamer actions.
 - `/fiven tools` gives all authoring tools.
 
+## GUI tools: RMB-first workflow
+Every Fiven item whose main purpose is a GUI opens its interface with right click while held.
+
+Editors that need a target (NPC, MFL, animation-condition entity, lift, lift panel or TV) open a searchable nearby-target selector when right-clicked in the air. Direct right-click on a concrete NPC/entity/lift/panel still opens that target immediately where applicable.
+
+Tools whose purpose is direct world editing rather than a GUI (path points, linking, stone-button binding, etc.) keep their world interaction behavior.
+
 ## Lift floor sets
-Each independent lift should have a unique ID in the in-game lift editor. Use the same ID as the floor-set ID when capturing floor layers. This allows multiple lifts to reuse floors 1–9 without overwriting each other.
+New lifts are physical blocks. Each independent lift should have a unique ID in the in-game Lift Editor. Use the same ID as the floor-set ID when capturing floor layers. This allows multiple lifts to reuse floors 1–9 without overwriting each other.
 
-Old maps that have floor data without a floor-set ID are treated as `default` and remain available as a compatibility fallback.
+Old maps that have floor data without a floor-set ID are treated as `default` and remain available as a compatibility fallback. Legacy entity lift/panel registrations are retained only so older worlds can load and be migrated.
 
-A blocked door floor is still a valid travel destination: the lift arrives, but the doors stay closed. Floors 2, 5 and 8 are blocked by default.
+A blocked-door floor is still a valid travel destination: the lift arrives, but the doors stay closed. Floors 2, 5 and 8 are blocked by default.
+
+A vanilla stone button can be bound to a physical lift with Lift Button Binder. Bound buttons are handled by Fiven instead of acting as ordinary redstone switches.
 
 ## FifthScript examples
 ```php
@@ -47,4 +57,4 @@ Windows:
 gradlew.bat clean build
 ```
 
-Every push to `main`/`fix/**` and every pull request is validated by the Java 17 Gradle build workflow.
+Every pull request is validated by the Java 17 Gradle build workflow and publishes the built JARs as the `fivens-build` workflow artifact after a successful build.

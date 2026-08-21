@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "fiven:block/lift_panel" },
+    "facing=east": { "model": "fiven:block/lift_panel", "y": 90 },
+    "facing=south": { "model": "fiven:block/lift_panel", "y": 180 },
+    "facing=west": { "model": "fiven:block/lift_panel", "y": 270 }
+  }
+}

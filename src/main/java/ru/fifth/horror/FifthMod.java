@@ -15,6 +15,7 @@ import net.fabricmc.fabric.api.object.builder.v1.entity.FabricDefaultAttributeRe
 import net.fabricmc.fabric.api.object.builder.v1.entity.FabricEntityTypeBuilder;
 import net.minecraft.block.AbstractBlock;
 import net.minecraft.block.Block;
+import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.entity.EntityDimensions;
 import net.minecraft.entity.EntityType;
@@ -36,1104 +37,141 @@ import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Identifier;
 import ru.fifth.horror.animation.AnimationConditionManager;
-import ru.fifth.horror.block.CassetteDriveBlock;
-import ru.fifth.horror.block.CassetteDriveBlockEntity;
-import ru.fifth.horror.block.ScriptComputerBlock;
-import ru.fifth.horror.block.ScriptComputerBlockEntity;
-import ru.fifth.horror.block.TelevisionBlock;
-import ru.fifth.horror.block.TelevisionBlockEntity;
+import ru.fifth.horror.block.*;
 import ru.fifth.horror.cutscene.CutsceneManager;
 import ru.fifth.horror.effect.EntityEffectManager;
-import ru.fifth.horror.entity.DirectorNpcEntity;
-import ru.fifth.horror.entity.LiftButtonEntity;
-import ru.fifth.horror.entity.LiftEntity;
-import ru.fifth.horror.entity.LiftPanelEntity;
-import ru.fifth.horror.entity.MonsterForLiftEntity;
-import ru.fifth.horror.item.AnimationConditionToolItem;
-import ru.fifth.horror.item.BuildLayerToolItem;
-import ru.fifth.horror.item.EntityPlacerItem;
-import ru.fifth.horror.item.EntityShaderToolItem;
-import ru.fifth.horror.item.LiftButtonBinderItem;
-import ru.fifth.horror.item.LiftEditorToolItem;
-import ru.fifth.horror.item.LiftPanelItem;
-import ru.fifth.horror.item.LiftPanelToolItem;
-import ru.fifth.horror.item.MflEditorToolItem;
-import ru.fifth.horror.item.MflPathToolItem;
-import ru.fifth.horror.item.NpcComputerLinkToolItem;
-import ru.fifth.horror.item.NpcEditorToolItem;
-import ru.fifth.horror.item.NpcPathToolItem;
-import ru.fifth.horror.item.NpcSpawnEggItem;
-import ru.fifth.horror.item.NpcStateToolItem;
-import ru.fifth.horror.item.TvLinkToolItem;
-import ru.fifth.horror.item.VhsCassetteItem;
+import ru.fifth.horror.entity.*;
+import ru.fifth.horror.item.*;
 import ru.fifth.horror.lift.LiftManager;
 import ru.fifth.horror.network.FifthNetworking;
 import ru.fifth.horror.script.FifthScriptEngine;
 import ru.fifth.horror.structure.StructureLayerManager;
 import software.bernie.geckolib.GeckoLib;
 
+/** Main registry and server bootstrap for Fiven. */
 public final class FifthMod implements ModInitializer {
-
     public static final String MOD_ID = "fiven";
+    public static Identifier id(String path) { return new Identifier(MOD_ID, path); }
 
-    public static Identifier id(String path) {
-        return new Identifier(MOD_ID, path);
-    }
+    // Living/gameplay entities. Legacy lift/panel entity ids stay registered only so old worlds can load.
+    public static final EntityType<DirectorNpcEntity> DIRECTOR_NPC = Registry.register(Registries.ENTITY_TYPE, id("director_npc"),
+            FabricEntityTypeBuilder.create(SpawnGroup.CREATURE, DirectorNpcEntity::new).dimensions(EntityDimensions.fixed(.6f,1.8f)).trackRangeBlocks(96).build());
+    public static final EntityType<LiftEntity> LIFT = Registry.register(Registries.ENTITY_TYPE, id("lift"),
+            FabricEntityTypeBuilder.<LiftEntity>create(SpawnGroup.MISC, LiftEntity::new).dimensions(EntityDimensions.fixed(3f,7.4f)).trackRangeBlocks(128).build());
+    public static final EntityType<LiftButtonEntity> LIFT_BUTTON = Registry.register(Registries.ENTITY_TYPE, id("lift_button"),
+            FabricEntityTypeBuilder.<LiftButtonEntity>create(SpawnGroup.MISC, LiftButtonEntity::new).dimensions(EntityDimensions.fixed(.7f,.45f)).trackRangeBlocks(96).build());
+    public static final EntityType<LiftPanelEntity> LIFT_PANEL = Registry.register(Registries.ENTITY_TYPE, id("lift_panel"),
+            FabricEntityTypeBuilder.<LiftPanelEntity>create(SpawnGroup.MISC, LiftPanelEntity::new).dimensions(EntityDimensions.fixed(1f,1f)).trackRangeBlocks(96).build());
+    public static final EntityType<MonsterForLiftEntity> MONSTER_FOR_LIFT = Registry.register(Registries.ENTITY_TYPE, id("monster_for_lift"),
+            FabricEntityTypeBuilder.create(SpawnGroup.MONSTER, MonsterForLiftEntity::new).dimensions(EntityDimensions.fixed(.85f,2.55f)).trackRangeBlocks(96).build());
 
-    // ============================================================
-    // ENTITIES
-    // ============================================================
+    // Physical blocks.
+    public static final Block LIFT_BLOCK = Registry.register(Registries.BLOCK, id("lift"), new LiftBlock(AbstractBlock.Settings.create().strength(5f).requiresTool()));
+    public static final Item LIFT_ITEM = Registry.register(Registries.ITEM, id("lift"), new BlockItem(LIFT_BLOCK, new Item.Settings().maxCount(8)));
+    public static final Block LIFT_PANEL_BLOCK = Registry.register(Registries.BLOCK, id("lift_panel"), new LiftPanelBlock(AbstractBlock.Settings.create().strength(2f)));
+    public static final Item LIFT_PANEL_ITEM = Registry.register(Registries.ITEM, id("lift_panel"), new BlockItem(LIFT_PANEL_BLOCK, new Item.Settings().maxCount(16)));
 
-    public static final EntityType<DirectorNpcEntity> DIRECTOR_NPC = Registry.register(
-            Registries.ENTITY_TYPE,
-            id("director_npc"),
-            FabricEntityTypeBuilder.create(
-                    SpawnGroup.CREATURE,
-                    DirectorNpcEntity::new)
-                    .dimensions(EntityDimensions.fixed(0.6f, 1.8f))
-                    .trackRangeBlocks(96)
-                    .build());
+    public static final Block TELEVISION = Registry.register(Registries.BLOCK,id("television"),new TelevisionBlock(AbstractBlock.Settings.create().strength(2.5f)));
+    public static final Item TELEVISION_ITEM = Registry.register(Registries.ITEM,id("television"),new BlockItem(TELEVISION,new Item.Settings()));
+    public static final Block CASSETTE_DRIVE = Registry.register(Registries.BLOCK,id("cassette_drive"),new CassetteDriveBlock(AbstractBlock.Settings.create().strength(2.5f)));
+    public static final Item CASSETTE_DRIVE_ITEM = Registry.register(Registries.ITEM,id("cassette_drive"),new BlockItem(CASSETTE_DRIVE,new Item.Settings()));
+    public static final Block SCRIPT_COMPUTER = Registry.register(Registries.BLOCK,id("script_computer"),new ScriptComputerBlock(AbstractBlock.Settings.create().strength(4f).requiresTool()));
+    public static final Item SCRIPT_COMPUTER_ITEM = Registry.register(Registries.ITEM,id("script_computer"),new BlockItem(SCRIPT_COMPUTER,new Item.Settings()));
 
-    public static final EntityType<LiftEntity> LIFT = Registry.register(
-            Registries.ENTITY_TYPE,
-            id("lift"),
-            FabricEntityTypeBuilder.<LiftEntity>create(
-                    SpawnGroup.MISC,
-                    LiftEntity::new)
-                    .dimensions(EntityDimensions.fixed(3.0f, 7.4f))
-                    .trackRangeBlocks(128)
-                    .build());
+    // Block entities.
+    public static final BlockEntityType<LiftBlockEntity> LIFT_BE = Registry.register(Registries.BLOCK_ENTITY_TYPE,id("lift"),
+            FabricBlockEntityTypeBuilder.create(LiftBlockEntity::new,LIFT_BLOCK).build());
+    public static final BlockEntityType<LiftPanelBlockEntity> LIFT_PANEL_BE = Registry.register(Registries.BLOCK_ENTITY_TYPE,id("lift_panel"),
+            FabricBlockEntityTypeBuilder.create(LiftPanelBlockEntity::new,LIFT_PANEL_BLOCK).build());
+    public static final BlockEntityType<TelevisionBlockEntity> TELEVISION_BE = Registry.register(Registries.BLOCK_ENTITY_TYPE,id("television"),
+            FabricBlockEntityTypeBuilder.create(TelevisionBlockEntity::new,TELEVISION).build());
+    public static final BlockEntityType<CassetteDriveBlockEntity> CASSETTE_DRIVE_BE = Registry.register(Registries.BLOCK_ENTITY_TYPE,id("cassette_drive"),
+            FabricBlockEntityTypeBuilder.create(CassetteDriveBlockEntity::new,CASSETTE_DRIVE).build());
+    public static final BlockEntityType<ScriptComputerBlockEntity> SCRIPT_COMPUTER_BE = Registry.register(Registries.BLOCK_ENTITY_TYPE,id("script_computer"),
+            FabricBlockEntityTypeBuilder.create(ScriptComputerBlockEntity::new,SCRIPT_COMPUTER).build());
 
-    public static final EntityType<LiftButtonEntity> LIFT_BUTTON = Registry.register(
-            Registries.ENTITY_TYPE,
-            id("lift_button"),
-            FabricEntityTypeBuilder.<LiftButtonEntity>create(
-                    SpawnGroup.MISC,
-                    LiftButtonEntity::new)
-                    .dimensions(EntityDimensions.fixed(0.7f, 0.45f))
-                    .trackRangeBlocks(96)
-                    .build());
+    // Director tools/items.
+    public static final Item NPC_CREATOR=reg("npc_creator",new Item(new Item.Settings().maxCount(1)));
+    public static final Item NPC_SPAWN_EGG=reg("npc_spawn_egg",new NpcSpawnEggItem(new Item.Settings().maxCount(16)));
+    public static final Item NPC_PATH_TOOL=reg("npc_path_tool",new NpcPathToolItem(new Item.Settings().maxCount(1)));
+    public static final Item CAMERA_TOOL=reg("camera_tool",new Item(new Item.Settings().maxCount(1)));
+    public static final Item BUILD_LAYER_TOOL=reg("build_layer_tool",new BuildLayerToolItem(new Item.Settings().maxCount(1)));
+    public static final Item NPC_EDITOR_TOOL=reg("npc_editor_tool",new NpcEditorToolItem(new Item.Settings().maxCount(1)));
+    public static final Item NPC_STATE_TOOL=reg("npc_state_tool",new NpcStateToolItem(new Item.Settings().maxCount(1)));
+    public static final Item NPC_LINK_TOOL=reg("npc_link_tool",new NpcComputerLinkToolItem(new Item.Settings().maxCount(1)));
+    public static final Item LIFT_BUTTON_BINDER=reg("lift_button_binder",new LiftButtonBinderItem(new Item.Settings().maxCount(1)));
+    public static final Item MONSTER_FOR_LIFT_ITEM=reg("monster_for_lift",new EntityPlacerItem(new Item.Settings().maxCount(16),()->MONSTER_FOR_LIFT));
+    public static final Item MFL_SPAWN_EGG=reg("mfl_spawn_egg",new SpawnEggItem(MONSTER_FOR_LIFT,0x121014,0x9B1022,new Item.Settings()));
+    public static final Item MFL_EDITOR_TOOL=reg("mfl_editor_tool",new MflEditorToolItem(new Item.Settings().maxCount(1)));
+    public static final Item MFL_PATH_TOOL=reg("mfl_path_tool",new MflPathToolItem(new Item.Settings().maxCount(1)));
+    public static final Item VHS_CASSETTE=reg("vhs_cassette",new VhsCassetteItem(new Item.Settings()));
+    public static final Item TV_LINK_TOOL=reg("tv_link_tool",new TvLinkToolItem(new Item.Settings().maxCount(1)));
+    public static final Item ANIMATION_CONDITION_TOOL=reg("animation_condition_tool",new AnimationConditionToolItem(new Item.Settings().maxCount(1)));
+    public static final Item LIFT_PANEL_TOOL=reg("lift_panel_tool",new LiftPanelToolItem(new Item.Settings().maxCount(1)));
+    public static final Item LIFT_EDITOR_TOOL=reg("lift_editor_tool",new LiftEditorToolItem(new Item.Settings().maxCount(1)));
+    public static final Item ENTITY_SHADER_TOOL=reg("entity_shader_tool",new EntityShaderToolItem(new Item.Settings().maxCount(1)));
+    public static final Item CUTSCENE_LIBRARY_TOOL=reg("cutscene_library_tool",new Item(new Item.Settings().maxCount(1)));
 
-    public static final EntityType<LiftPanelEntity> LIFT_PANEL = Registry.register(
-            Registries.ENTITY_TYPE,
-            id("lift_panel"),
-            FabricEntityTypeBuilder.<LiftPanelEntity>create(
-                    SpawnGroup.MISC,
-                    LiftPanelEntity::new)
-                    .dimensions(EntityDimensions.fixed(1.0f, 1.0f))
-                    .trackRangeBlocks(96)
-                    .build());
+    private static Item reg(String id,Item item){return Registry.register(Registries.ITEM,FifthMod.id(id),item);}
+    public static final RegistryKey<ItemGroup> FIFTH_ITEM_GROUP_KEY=RegistryKey.of(RegistryKeys.ITEM_GROUP,id("director_tools"));
 
-    public static final EntityType<MonsterForLiftEntity> MONSTER_FOR_LIFT = Registry.register(
-            Registries.ENTITY_TYPE,
-            id("monster_for_lift"),
-            FabricEntityTypeBuilder.create(
-                    SpawnGroup.MONSTER,
-                    MonsterForLiftEntity::new)
-                    .dimensions(EntityDimensions.fixed(0.85f, 2.55f))
-                    .trackRangeBlocks(96)
-                    .build());
-
-    // ============================================================
-    // ITEMS
-    // ============================================================
-
-    public static final Item NPC_CREATOR = Registry.register(
-            Registries.ITEM,
-            id("npc_creator"),
-            new Item(new Item.Settings().maxCount(1)));
-
-    public static final Item NPC_SPAWN_EGG = Registry.register(
-            Registries.ITEM,
-            id("npc_spawn_egg"),
-            new NpcSpawnEggItem(
-                    new Item.Settings().maxCount(16)));
-
-    public static final Item NPC_PATH_TOOL = Registry.register(
-            Registries.ITEM,
-            id("npc_path_tool"),
-            new NpcPathToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item CAMERA_TOOL = Registry.register(
-            Registries.ITEM,
-            id("camera_tool"),
-            new Item(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item BUILD_LAYER_TOOL = Registry.register(
-            Registries.ITEM,
-            id("build_layer_tool"),
-            new BuildLayerToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item NPC_EDITOR_TOOL = Registry.register(
-            Registries.ITEM,
-            id("npc_editor_tool"),
-            new NpcEditorToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item NPC_STATE_TOOL = Registry.register(
-            Registries.ITEM,
-            id("npc_state_tool"),
-            new NpcStateToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item NPC_LINK_TOOL = Registry.register(
-            Registries.ITEM,
-            id("npc_link_tool"),
-            new NpcComputerLinkToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item LIFT_ITEM = Registry.register(
-            Registries.ITEM,
-            id("lift"),
-            new EntityPlacerItem(
-                    new Item.Settings().maxCount(8),
-                    () -> LIFT));
-
-    public static final Item LIFT_BUTTON_BINDER = Registry.register(
-            Registries.ITEM,
-            id("lift_button_binder"),
-            new LiftButtonBinderItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item MONSTER_FOR_LIFT_ITEM = Registry.register(
-            Registries.ITEM,
-            id("monster_for_lift"),
-            new EntityPlacerItem(
-                    new Item.Settings().maxCount(16),
-                    () -> MONSTER_FOR_LIFT));
-
-    public static final Item MFL_SPAWN_EGG = Registry.register(
-            Registries.ITEM,
-            id("mfl_spawn_egg"),
-            new SpawnEggItem(
-                    MONSTER_FOR_LIFT,
-                    0x121014,
-                    0x9B1022,
-                    new Item.Settings()));
-
-    public static final Item MFL_EDITOR_TOOL = Registry.register(
-            Registries.ITEM,
-            id("mfl_editor_tool"),
-            new MflEditorToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item MFL_PATH_TOOL = Registry.register(
-            Registries.ITEM,
-            id("mfl_path_tool"),
-            new MflPathToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item VHS_CASSETTE = Registry.register(
-            Registries.ITEM,
-            id("vhs_cassette"),
-            new VhsCassetteItem(
-                    new Item.Settings()));
-
-    // ============================================================
-    // TV / VHS
-    // ============================================================
-
-    public static final Block TELEVISION = Registry.register(
-            Registries.BLOCK,
-            id("television"),
-            new TelevisionBlock(
-                    AbstractBlock.Settings.create()
-                            .strength(2.5f)));
-
-    public static final Item TELEVISION_ITEM = Registry.register(
-            Registries.ITEM,
-            id("television"),
-            new BlockItem(
-                    TELEVISION,
-                    new Item.Settings()));
-
-    public static final Block CASSETTE_DRIVE = Registry.register(
-            Registries.BLOCK,
-            id("cassette_drive"),
-            new CassetteDriveBlock(
-                    AbstractBlock.Settings.create()
-                            .strength(2.5f)));
-
-    public static final Item CASSETTE_DRIVE_ITEM = Registry.register(
-            Registries.ITEM,
-            id("cassette_drive"),
-            new BlockItem(
-                    CASSETTE_DRIVE,
-                    new Item.Settings()));
-
-    public static final BlockEntityType<TelevisionBlockEntity> TELEVISION_BE = Registry.register(
-            Registries.BLOCK_ENTITY_TYPE,
-            id("television"),
-            FabricBlockEntityTypeBuilder
-                    .create(
-                            TelevisionBlockEntity::new,
-                            TELEVISION)
-                    .build());
-
-    public static final BlockEntityType<CassetteDriveBlockEntity> CASSETTE_DRIVE_BE = Registry.register(
-            Registries.BLOCK_ENTITY_TYPE,
-            id("cassette_drive"),
-            FabricBlockEntityTypeBuilder
-                    .create(
-                            CassetteDriveBlockEntity::new,
-                            CASSETTE_DRIVE)
-                    .build());
-
-    public static final Item TV_LINK_TOOL = Registry.register(
-            Registries.ITEM,
-            id("tv_link_tool"),
-            new TvLinkToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item ANIMATION_CONDITION_TOOL = Registry.register(
-            Registries.ITEM,
-            id("animation_condition_tool"),
-            new AnimationConditionToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    // ============================================================
-    // LIFT TOOLS
-    // ============================================================
-
-    public static final Item LIFT_PANEL_ITEM = Registry.register(
-            Registries.ITEM,
-            id("lift_panel"),
-            new LiftPanelItem(
-                    new Item.Settings().maxCount(16)));
-
-    public static final Item LIFT_PANEL_TOOL = Registry.register(
-            Registries.ITEM,
-            id("lift_panel_tool"),
-            new LiftPanelToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item LIFT_EDITOR_TOOL = Registry.register(
-            Registries.ITEM,
-            id("lift_editor_tool"),
-            new LiftEditorToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item ENTITY_SHADER_TOOL = Registry.register(
-            Registries.ITEM,
-            id("entity_shader_tool"),
-            new EntityShaderToolItem(
-                    new Item.Settings().maxCount(1)));
-
-    public static final Item CUTSCENE_LIBRARY_TOOL = Registry.register(
-            Registries.ITEM,
-            id("cutscene_library_tool"),
-            new Item(
-                    new Item.Settings().maxCount(1)));
-
-    // ============================================================
-    // SCRIPT COMPUTER
-    // ============================================================
-
-    public static final Block SCRIPT_COMPUTER = Registry.register(
-            Registries.BLOCK,
-            id("script_computer"),
-            new ScriptComputerBlock(
-                    AbstractBlock.Settings.create()
-                            .strength(4.0f)
-                            .requiresTool()));
-
-    public static final Item SCRIPT_COMPUTER_ITEM = Registry.register(
-            Registries.ITEM,
-            id("script_computer"),
-            new BlockItem(
-                    SCRIPT_COMPUTER,
-                    new Item.Settings()));
-
-    public static final BlockEntityType<ScriptComputerBlockEntity> SCRIPT_COMPUTER_BE = Registry.register(
-            Registries.BLOCK_ENTITY_TYPE,
-            id("script_computer"),
-            FabricBlockEntityTypeBuilder
-                    .create(
-                            ScriptComputerBlockEntity::new,
-                            SCRIPT_COMPUTER)
-                    .build());
-
-    // ============================================================
-    // ITEM GROUP
-    // ============================================================
-
-    public static final RegistryKey<ItemGroup> FIFTH_ITEM_GROUP_KEY = RegistryKey.of(
-            RegistryKeys.ITEM_GROUP,
-            id("director_tools"));
-
-    // ============================================================
-    // INITIALIZATION
-    // ============================================================
-
-    @Override
-    public void onInitialize() {
-
+    @Override public void onInitialize(){
         GeckoLib.initialize();
-
-        registerItemGroup();
-        registerAttributes();
-        registerRuntimeSystems();
-        registerInteractions();
-        registerCommands();
+        registerItemGroup(); registerAttributes(); FifthNetworking.registerServer();
+        ServerLifecycleEvents.SERVER_STARTED.register(server->{FifthScriptEngine.reload(server);StructureLayerManager.restoreDefaults(server);LiftManager.load(server);AnimationConditionManager.load(server);EntityEffectManager.load(server);});
+        ServerPlayConnectionEvents.JOIN.register((handler,sender,server)->server.execute(()->EntityEffectManager.syncAll(handler.player)));
+        ServerTickEvents.END_SERVER_TICK.register(server->{FifthScriptEngine.tick(server);CutsceneManager.tick(server);LiftManager.tick(server);AnimationConditionManager.tick(server);});
+        registerInteractions(); registerCommands();
     }
 
-    // ============================================================
-    // ITEM GROUP
-    // ============================================================
-
-    private static void registerItemGroup() {
-
-        Registry.register(
-                Registries.ITEM_GROUP,
-                FIFTH_ITEM_GROUP_KEY,
-
-                FabricItemGroup.builder()
-                        .displayName(
-                                Text.translatable(
-                                        "itemGroup.fiven.director_tools"))
-                        .icon(
-                                () -> new ItemStack(NPC_CREATOR))
-                        .entries((context, entries) -> {
-
-                            entries.add(NPC_CREATOR);
-                            entries.add(NPC_SPAWN_EGG);
-                            entries.add(NPC_PATH_TOOL);
-                            entries.add(NPC_EDITOR_TOOL);
-
-                            entries.add(CAMERA_TOOL);
-                            entries.add(BUILD_LAYER_TOOL);
-
-                            entries.add(NPC_STATE_TOOL);
-                            entries.add(NPC_LINK_TOOL);
-
-                            entries.add(SCRIPT_COMPUTER_ITEM);
-
-                            entries.add(LIFT_BUTTON_BINDER);
-                            entries.add(LIFT_ITEM);
-
-                            entries.add(MFL_SPAWN_EGG);
-                            entries.add(MFL_EDITOR_TOOL);
-                            entries.add(MFL_PATH_TOOL);
-
-                            entries.add(VHS_CASSETTE);
-                            entries.add(TELEVISION_ITEM);
-                            entries.add(CASSETTE_DRIVE_ITEM);
-                            entries.add(TV_LINK_TOOL);
-
-                            entries.add(ANIMATION_CONDITION_TOOL);
-
-                            entries.add(LIFT_PANEL_ITEM);
-                            entries.add(LIFT_PANEL_TOOL);
-                            entries.add(LIFT_EDITOR_TOOL);
-
-                            entries.add(ENTITY_SHADER_TOOL);
-                            entries.add(CUTSCENE_LIBRARY_TOOL);
-                        })
-                        .build());
+    private static void registerAttributes(){
+        DefaultAttributeContainer.Builder attrs=DirectorNpcEntity.createMobAttributes().add(EntityAttributes.GENERIC_MAX_HEALTH,20).add(EntityAttributes.GENERIC_MOVEMENT_SPEED,.25).add(EntityAttributes.GENERIC_FOLLOW_RANGE,48);
+        FabricDefaultAttributeRegistry.register(DIRECTOR_NPC,attrs);
+        FabricDefaultAttributeRegistry.register(MONSTER_FOR_LIFT,MonsterForLiftEntity.createMobAttributes().add(EntityAttributes.GENERIC_MAX_HEALTH,35).add(EntityAttributes.GENERIC_MOVEMENT_SPEED,.28).add(EntityAttributes.GENERIC_FOLLOW_RANGE,48));
     }
 
-    // ============================================================
-    // ATTRIBUTES
-    // ============================================================
-
-    private static void registerAttributes() {
-
-        DefaultAttributeContainer.Builder npcAttributes = DirectorNpcEntity.createMobAttributes()
-                .add(
-                        EntityAttributes.GENERIC_MAX_HEALTH,
-                        20.0)
-                .add(
-                        EntityAttributes.GENERIC_MOVEMENT_SPEED,
-                        0.25)
-                .add(
-                        EntityAttributes.GENERIC_FOLLOW_RANGE,
-                        48.0);
-
-        FabricDefaultAttributeRegistry.register(
-                DIRECTOR_NPC,
-                npcAttributes);
-
-        FabricDefaultAttributeRegistry.register(
-                MONSTER_FOR_LIFT,
-
-                MonsterForLiftEntity.createMobAttributes()
-                        .add(
-                                EntityAttributes.GENERIC_MAX_HEALTH,
-                                35.0)
-                        .add(
-                                EntityAttributes.GENERIC_MOVEMENT_SPEED,
-                                0.28)
-                        .add(
-                                EntityAttributes.GENERIC_FOLLOW_RANGE,
-                                48.0));
+    private static void registerItemGroup(){
+        Registry.register(Registries.ITEM_GROUP,FIFTH_ITEM_GROUP_KEY,FabricItemGroup.builder().displayName(Text.translatable("itemGroup.fiven.director_tools")).icon(()->new ItemStack(NPC_CREATOR)).entries((c,e)->{
+            for(Item item:new Item[]{NPC_CREATOR,NPC_SPAWN_EGG,NPC_PATH_TOOL,NPC_EDITOR_TOOL,CAMERA_TOOL,BUILD_LAYER_TOOL,NPC_STATE_TOOL,NPC_LINK_TOOL,SCRIPT_COMPUTER_ITEM,LIFT_BUTTON_BINDER,LIFT_ITEM,LIFT_PANEL_ITEM,LIFT_PANEL_TOOL,LIFT_EDITOR_TOOL,MFL_SPAWN_EGG,MFL_EDITOR_TOOL,MFL_PATH_TOOL,VHS_CASSETTE,TELEVISION_ITEM,CASSETTE_DRIVE_ITEM,TV_LINK_TOOL,ANIMATION_CONDITION_TOOL,ENTITY_SHADER_TOOL,CUTSCENE_LIBRARY_TOOL})e.add(item);
+        }).build());
     }
 
-    // ============================================================
-    // SERVER SYSTEMS
-    // ============================================================
-
-    private static void registerRuntimeSystems() {
-
-        FifthNetworking.registerServer();
-
-        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
-
-            FifthScriptEngine.reload(server);
-
-            StructureLayerManager.restoreDefaults(server);
-
-            LiftManager.load(server);
-
-            AnimationConditionManager.load(server);
-
-            EntityEffectManager.load(server);
+    private static void registerInteractions(){
+        // Legacy entity lift only: lets old worlds tell the player to migrate; new lift selection happens on the block.
+        UseEntityCallback.EVENT.register((player,world,hand,entity,hit)->{
+            if(player.getStackInHand(hand).isOf(LIFT_BUTTON_BINDER)&&entity instanceof LiftEntity legacy)return LiftButtonBinderItem.selectLift(player.getStackInHand(hand),player,legacy);
+            if(player.getStackInHand(hand).isOf(MFL_PATH_TOOL)&&entity instanceof MonsterForLiftEntity mfl)return MflPathToolItem.select(player.getStackInHand(hand),player,mfl);
+            return ActionResult.PASS;
         });
-
-        ServerPlayConnectionEvents.JOIN.register(
-                (handler, sender, server) -> server.execute(
-                        () -> EntityEffectManager.syncAll(
-                                handler.player)));
-
-        ServerTickEvents.END_SERVER_TICK.register(server -> {
-
-            FifthScriptEngine.tick(server);
-
-            CutsceneManager.tick(server);
-
-            LiftManager.tick(server);
-
-            AnimationConditionManager.tick(server);
+        UseBlockCallback.EVENT.register((player,world,hand,hit)->{
+            if(!world.isClient&&player instanceof ServerPlayerEntity sp&&world.getBlockState(hit.getBlockPos()).isOf(Blocks.STONE_BUTTON)){
+                if(LiftManager.callBoundButton(sp,hit.getBlockPos()))return ActionResult.SUCCESS; // Fiven-owned button: no vanilla redstone use.
+            }
+            return ActionResult.PASS;
         });
     }
 
-    // ============================================================
-    // ENTITY / BLOCK INTERACTIONS
-    // ============================================================
-
-    private static void registerInteractions() {
-
-        UseEntityCallback.EVENT.register(
-                (player, world, hand, entity, hit) -> {
-
-                    ItemStack heldStack = player.getStackInHand(hand);
-
-                    // ------------------------------------------------
-                    // LIFT BUTTON BINDER -> SELECT LIFT
-                    // ------------------------------------------------
-
-                    if (heldStack.isOf(LIFT_BUTTON_BINDER)
-                            && entity instanceof LiftEntity lift) {
-
-                        return LiftButtonBinderItem.selectLift(
-                                heldStack,
-                                player,
-                                lift);
-                    }
-
-                    // ------------------------------------------------
-                    // LIFT EDITOR
-                    // ------------------------------------------------
-
-                    if (heldStack.isOf(LIFT_EDITOR_TOOL)
-                            && entity instanceof LiftEntity liftEdit) {
-
-                        if (!world.isClient
-                                && player instanceof ServerPlayerEntity serverPlayer) {
-
-                            FifthNetworking.openLiftEditor(
-                                    serverPlayer,
-                                    liftEdit);
-                        }
-
-                        return ActionResult.SUCCESS;
-                    }
-
-                    // ------------------------------------------------
-                    // MFL PATH
-                    // ------------------------------------------------
-
-                    if (heldStack.isOf(MFL_PATH_TOOL)
-                            && entity instanceof MonsterForLiftEntity monster) {
-
-                        return MflPathToolItem.select(
-                                heldStack,
-                                player,
-                                monster);
-                    }
-
-                    // ------------------------------------------------
-                    // LIFT PANEL
-                    // ------------------------------------------------
-
-                    if (entity instanceof LiftPanelEntity panel) {
-
-                        if (heldStack.isOf(LIFT_PANEL_TOOL)) {
-
-                            if (!world.isClient
-                                    && player instanceof ServerPlayerEntity serverPlayer) {
-
-                                var nbt = heldStack.getOrCreateNbt();
-
-                                if (nbt.containsUuid("FivenLiftUuid")) {
-
-                                    panel.setLiftUuid(
-                                            nbt.getUuid(
-                                                    "FivenLiftUuid"));
-                                }
-
-                                FifthNetworking.openLiftPanel(
-                                        serverPlayer,
-                                        panel,
-                                        true);
-                            }
-
-                            return ActionResult.SUCCESS;
-                        }
-
-                        if (!world.isClient
-                                && player instanceof ServerPlayerEntity serverPlayer) {
-
-                            FifthNetworking.openLiftPanel(
-                                    serverPlayer,
-                                    panel,
-                                    false);
-                        }
-
-                        return ActionResult.SUCCESS;
-                    }
-
-                    // ------------------------------------------------
-                    // SELECT LIFT FOR PANEL
-                    // ------------------------------------------------
-
-                    if (heldStack.isOf(LIFT_PANEL_TOOL)
-                            && entity instanceof LiftEntity lift) {
-
-                        if (!world.isClient) {
-
-                            heldStack.getOrCreateNbt()
-                                    .putUuid(
-                                            "FivenLiftUuid",
-                                            lift.getUuid());
-
-                            player.sendMessage(
-                                    Text.literal(
-                                            "§7Лифт выбран для панели: §f"
-                                                    + lift.getLiftId()),
-                                    true);
-                        }
-
-                        return ActionResult.SUCCESS;
-                    }
-
-                    return ActionResult.PASS;
-                });
-
-        UseBlockCallback.EVENT.register(
-                (player, world, hand, hit) -> {
-
-                    if (!world.isClient
-                            && player instanceof ServerPlayerEntity serverPlayer
-                            && world.getBlockState(
-                                    hit.getBlockPos()).isOf(
-                                            net.minecraft.block.Blocks.STONE_BUTTON)) {
-
-                        /*
-                         * Вызываем лифт,
-                         * но обязательно возвращаем PASS ниже,
-                         * чтобы Minecraft сам продолжил обработку
-                         * каменной кнопки:
-                         *
-                         * - проиграл звук;
-                         * - включил pressed=true;
-                         * - запустил обычную анимацию.
-                         */
-
-                        LiftManager.callBoundButton(
-                                serverPlayer,
-                                hit.getBlockPos());
-                    }
-
-                    return ActionResult.PASS;
-                });
+    private static void registerCommands(){
+        CommandRegistrationCallback.EVENT.register((dispatcher,registryAccess,environment)->dispatcher.register(CommandManager.literal("fiven")
+                .then(CommandManager.literal("tools").requires(s->s.hasPermissionLevel(2)).executes(ctx->{giveDirectorTools(ctx.getSource().getPlayerOrThrow());return 1;}))
+                .then(CommandManager.literal("restore-defaults").requires(s->s.hasPermissionLevel(2)).executes(ctx->{StructureLayerManager.restoreDefaults(ctx.getSource().getServer());ctx.getSource().sendFeedback(()->Text.literal("Слои по умолчанию восстановлены."),false);return 1;}))
+                .then(CommandManager.literal("reload-scripts").requires(s->s.hasPermissionLevel(2)).executes(ctx->{FifthScriptEngine.reload(ctx.getSource().getServer());ctx.getSource().sendFeedback(()->Text.literal("FifthScript перезагружен."),false);return 1;}))
+                .then(animationTree("animation"))));
+        CommandRegistrationCallback.EVENT.register((dispatcher,registryAccess,environment)->dispatcher.register(animationTree("fivenanim")));
+        CommandRegistrationCallback.EVENT.register((dispatcher,registryAccess,environment)->dispatcher.register(CommandManager.literal("lift").then(CommandManager.argument("floor",IntegerArgumentType.integer(1,9)).executes(ctx->{ServerPlayerEntity p=ctx.getSource().getPlayerOrThrow();LiftBlockEntity lift=LiftManager.nearestLift(p,48);if(lift==null){ctx.getSource().sendError(Text.literal("Рядом не найден блок лифта Fiven."));return 0;}return LiftManager.travel(p,lift,IntegerArgumentType.getInteger(ctx,"floor"))?1:0;}))));
     }
 
-    // ============================================================
-    // COMMANDS
-    // ============================================================
-
-    private static void registerCommands() {
-
-        registerMainCommand();
-
-        registerAnimationAliasCommand();
-
-        registerLiftCommand();
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<net.minecraft.server.command.ServerCommandSource> animationTree(String literal){
+        var root=CommandManager.literal(literal);
+        if("animation".equals(literal)){} // used as /fiven animation
+        return root
+                .then(CommandManager.literal("play").then(CommandManager.argument("target",StringArgumentType.word()).then(CommandManager.argument("animation",StringArgumentType.greedyString()).executes(ctx->{var e=AnimationConditionManager.findNamed(ctx.getSource().getServer(),StringArgumentType.getString(ctx,"target"));if(e==null){ctx.getSource().sendError(Text.literal("Сущность не найдена."));return 0;}AnimationConditionManager.play(e,StringArgumentType.getString(ctx,"animation"));return 1;}))))
+                .then(CommandManager.literal("stop").then(CommandManager.argument("target",StringArgumentType.word()).executes(ctx->{var e=AnimationConditionManager.findNamed(ctx.getSource().getServer(),StringArgumentType.getString(ctx,"target"));if(e==null)return 0;AnimationConditionManager.stop(e);return 1;})))
+                .then(CommandManager.literal("condition").then(CommandManager.argument("id",StringArgumentType.word()).executes(ctx->AnimationConditionManager.trigger(ctx.getSource().getServer(),StringArgumentType.getString(ctx,"id"))?1:0)));
     }
 
-    // ============================================================
-    // /fiven
-    // ============================================================
-
-    private static void registerMainCommand() {
-
-        CommandRegistrationCallback.EVENT.register(
-                (dispatcher, registryAccess, environment) -> {
-
-                    dispatcher.register(
-
-                            CommandManager.literal("fiven")
-
-                                    // ------------------------------------------------
-                                    // /fiven tools
-                                    // ------------------------------------------------
-
-                                    .then(
-                                            CommandManager.literal("tools")
-                                                    .requires(
-                                                            source -> source.hasPermissionLevel(2))
-                                                    .executes(ctx -> {
-
-                                                        ServerPlayerEntity player = ctx.getSource()
-                                                                .getPlayerOrThrow();
-
-                                                        giveDirectorTools(player);
-
-                                                        player.sendMessage(
-                                                                Text.literal(
-                                                                        "§8[§cПятый§8] "
-                                                                                + "§7Режиссёрские инструменты выданы."),
-                                                                false);
-
-                                                        return 1;
-                                                    }))
-
-                                    // ------------------------------------------------
-                                    // /fiven restore-defaults
-                                    // ------------------------------------------------
-
-                                    .then(
-                                            CommandManager.literal(
-                                                    "restore-defaults")
-                                                    .requires(
-                                                            source -> source.hasPermissionLevel(2))
-                                                    .executes(ctx -> {
-
-                                                        StructureLayerManager
-                                                                .restoreDefaults(
-                                                                        ctx.getSource()
-                                                                                .getServer());
-
-                                                        ctx.getSource()
-                                                                .sendFeedback(
-                                                                        () -> Text.literal(
-                                                                                "Слои по умолчанию восстановлены."),
-                                                                        false);
-
-                                                        return 1;
-                                                    }))
-
-                                    // ------------------------------------------------
-                                    // /fiven reload-scripts
-                                    // ------------------------------------------------
-
-                                    .then(
-                                            CommandManager.literal(
-                                                    "reload-scripts")
-                                                    .requires(
-                                                            source -> source.hasPermissionLevel(2))
-                                                    .executes(ctx -> {
-
-                                                        FifthScriptEngine.reload(
-                                                                ctx.getSource()
-                                                                        .getServer());
-
-                                                        ctx.getSource()
-                                                                .sendFeedback(
-                                                                        () -> Text.literal(
-                                                                                "FifthScript перезагружен."),
-                                                                        false);
-
-                                                        return 1;
-                                                    }))
-
-                                    // ------------------------------------------------
-                                    // /fiven animation
-                                    // ------------------------------------------------
-
-                                    .then(
-                                            CommandManager.literal(
-                                                    "animation")
-
-                                                    // ----------------------------
-                                                    // PLAY
-                                                    // ----------------------------
-
-                                                    .then(
-                                                            CommandManager.literal(
-                                                                    "play")
-                                                                    .then(
-                                                                            CommandManager.argument(
-                                                                                    "target",
-                                                                                    StringArgumentType.word())
-                                                                                    .then(
-                                                                                            CommandManager.argument(
-                                                                                                    "animation",
-                                                                                                    StringArgumentType
-                                                                                                            .greedyString())
-                                                                                                    .executes(ctx -> {
-
-                                                                                                        String target = StringArgumentType
-                                                                                                                .getString(
-                                                                                                                        ctx,
-                                                                                                                        "target");
-
-                                                                                                        String animation = StringArgumentType
-                                                                                                                .getString(
-                                                                                                                        ctx,
-                                                                                                                        "animation");
-
-                                                                                                        var entity = AnimationConditionManager
-                                                                                                                .findNamed(
-                                                                                                                        ctx.getSource()
-                                                                                                                                .getServer(),
-                                                                                                                        target);
-
-                                                                                                        if (entity == null) {
-
-                                                                                                            ctx.getSource()
-                                                                                                                    .sendError(
-                                                                                                                            Text.literal(
-                                                                                                                                    "Сущность не найдена."));
-
-                                                                                                            return 0;
-                                                                                                        }
-
-                                                                                                        AnimationConditionManager
-                                                                                                                .play(
-                                                                                                                        entity,
-                                                                                                                        animation);
-
-                                                                                                        return 1;
-                                                                                                    }))))
-
-                                                    // ----------------------------
-                                                    // STOP
-                                                    // ----------------------------
-
-                                                    .then(
-                                                            CommandManager.literal(
-                                                                    "stop")
-                                                                    .then(
-                                                                            CommandManager.argument(
-                                                                                    "target",
-                                                                                    StringArgumentType.word())
-                                                                                    .executes(ctx -> {
-
-                                                                                        String target = StringArgumentType
-                                                                                                .getString(
-                                                                                                        ctx,
-                                                                                                        "target");
-
-                                                                                        var entity = AnimationConditionManager
-                                                                                                .findNamed(
-                                                                                                        ctx.getSource()
-                                                                                                                .getServer(),
-                                                                                                        target);
-
-                                                                                        if (entity == null) {
-                                                                                            return 0;
-                                                                                        }
-
-                                                                                        AnimationConditionManager
-                                                                                                .stop(entity);
-
-                                                                                        return 1;
-                                                                                    })))
-
-                                                    // ----------------------------
-                                                    // CONDITION
-                                                    // ----------------------------
-
-                                                    .then(
-                                                            CommandManager.literal(
-                                                                    "condition")
-                                                                    .then(
-                                                                            CommandManager.argument(
-                                                                                    "id",
-                                                                                    StringArgumentType.word())
-                                                                                    .executes(ctx -> {
-
-                                                                                        String id = StringArgumentType
-                                                                                                .getString(
-                                                                                                        ctx,
-                                                                                                        "id");
-
-                                                                                        boolean result = AnimationConditionManager
-                                                                                                .trigger(
-                                                                                                        ctx.getSource()
-                                                                                                                .getServer(),
-                                                                                                        id);
-
-                                                                                        return result ? 1 : 0;
-                                                                                    })))));
-                });
-    }
-
-    // ============================================================
-    // /fivenanim
-    // ============================================================
-
-    private static void registerAnimationAliasCommand() {
-
-        CommandRegistrationCallback.EVENT.register(
-                (dispatcher, registryAccess, environment) -> {
-
-                    dispatcher.register(
-
-                            CommandManager.literal(
-                                    "fivenanim")
-
-                                    // ------------------------------------------------
-                                    // /fivenanim play <target> <animation>
-                                    // ------------------------------------------------
-
-                                    .then(
-                                            CommandManager.literal(
-                                                    "play")
-                                                    .then(
-                                                            CommandManager.argument(
-                                                                    "target",
-                                                                    StringArgumentType.word())
-                                                                    .then(
-                                                                            CommandManager.argument(
-                                                                                    "animation",
-                                                                                    StringArgumentType.greedyString())
-                                                                                    .executes(ctx -> {
-
-                                                                                        String target = StringArgumentType
-                                                                                                .getString(
-                                                                                                        ctx,
-                                                                                                        "target");
-
-                                                                                        String animation = StringArgumentType
-                                                                                                .getString(
-                                                                                                        ctx,
-                                                                                                        "animation");
-
-                                                                                        var entity = AnimationConditionManager
-                                                                                                .findNamed(
-                                                                                                        ctx.getSource()
-                                                                                                                .getServer(),
-                                                                                                        target);
-
-                                                                                        if (entity == null) {
-
-                                                                                            ctx.getSource()
-                                                                                                    .sendError(
-                                                                                                            Text.literal(
-                                                                                                                    "Сущность не найдена."));
-
-                                                                                            return 0;
-                                                                                        }
-
-                                                                                        AnimationConditionManager
-                                                                                                .play(
-                                                                                                        entity,
-                                                                                                        animation);
-
-                                                                                        return 1;
-                                                                                    }))))
-
-                                    // ------------------------------------------------
-                                    // /fivenanim stop <target>
-                                    // ------------------------------------------------
-
-                                    .then(
-                                            CommandManager.literal(
-                                                    "stop")
-                                                    .then(
-                                                            CommandManager.argument(
-                                                                    "target",
-                                                                    StringArgumentType.word())
-                                                                    .executes(ctx -> {
-
-                                                                        String target = StringArgumentType.getString(
-                                                                                ctx,
-                                                                                "target");
-
-                                                                        var entity = AnimationConditionManager
-                                                                                .findNamed(
-                                                                                        ctx.getSource()
-                                                                                                .getServer(),
-                                                                                        target);
-
-                                                                        if (entity == null) {
-                                                                            return 0;
-                                                                        }
-
-                                                                        AnimationConditionManager
-                                                                                .stop(entity);
-
-                                                                        return 1;
-                                                                    })))
-
-                                    // ------------------------------------------------
-                                    // /fivenanim condition <id>
-                                    // ------------------------------------------------
-
-                                    .then(
-                                            CommandManager.literal(
-                                                    "condition")
-                                                    .then(
-                                                            CommandManager.argument(
-                                                                    "id",
-                                                                    StringArgumentType.word())
-                                                                    .executes(ctx -> {
-
-                                                                        String id = StringArgumentType.getString(
-                                                                                ctx,
-                                                                                "id");
-
-                                                                        boolean result = AnimationConditionManager
-                                                                                .trigger(
-                                                                                        ctx.getSource()
-                                                                                                .getServer(),
-                                                                                        id);
-
-                                                                        return result ? 1 : 0;
-                                                                    }))));
-                });
-    }
-
-    // ============================================================
-    // /lift <floor>
-    // ============================================================
-
-    private static void registerLiftCommand() {
-
-        CommandRegistrationCallback.EVENT.register(
-                (dispatcher, registryAccess, environment) -> {
-
-                    dispatcher.register(
-
-                            CommandManager.literal(
-                                    "lift")
-                                    .then(
-                                            CommandManager.argument(
-                                                    "floor",
-                                                    IntegerArgumentType.integer(
-                                                            1,
-                                                            9))
-                                                    .executes(ctx -> {
-
-                                                        ServerPlayerEntity player = ctx.getSource()
-                                                                .getPlayerOrThrow();
-
-                                                        LiftEntity lift = LiftManager.nearestLift(
-                                                                player,
-                                                                48);
-
-                                                        if (lift == null) {
-
-                                                            ctx.getSource()
-                                                                    .sendError(
-                                                                            Text.literal(
-                                                                                    "Рядом не найден лифт Fiven."));
-
-                                                            return 0;
-                                                        }
-
-                                                        int floor = IntegerArgumentType
-                                                                .getInteger(
-                                                                        ctx,
-                                                                        "floor");
-
-                                                        return LiftManager.travel(
-                                                                player,
-                                                                lift,
-                                                                floor) ? 1 : 0;
-                                                    })));
-                });
-    }
-
-    // ============================================================
-    // GIVE TOOLS
-    // ============================================================
-
-    private static void giveDirectorTools(
-            ServerPlayerEntity player) {
-
-        player.giveItemStack(
-                NPC_CREATOR.getDefaultStack());
-
-        player.giveItemStack(
-                NPC_PATH_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                NPC_EDITOR_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                CAMERA_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                BUILD_LAYER_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                NPC_STATE_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                NPC_LINK_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                SCRIPT_COMPUTER_ITEM.getDefaultStack());
-
-        player.giveItemStack(
-                LIFT_BUTTON_BINDER.getDefaultStack());
-
-        player.giveItemStack(
-                LIFT_ITEM.getDefaultStack());
-
-        player.giveItemStack(
-                MFL_SPAWN_EGG.getDefaultStack());
-
-        player.giveItemStack(
-                MFL_EDITOR_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                MFL_PATH_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                VHS_CASSETTE.getDefaultStack());
-
-        player.giveItemStack(
-                TELEVISION_ITEM.getDefaultStack());
-
-        player.giveItemStack(
-                CASSETTE_DRIVE_ITEM.getDefaultStack());
-
-        player.giveItemStack(
-                TV_LINK_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                ANIMATION_CONDITION_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                LIFT_PANEL_ITEM.getDefaultStack());
-
-        player.giveItemStack(
-                LIFT_PANEL_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                LIFT_EDITOR_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                ENTITY_SHADER_TOOL.getDefaultStack());
-
-        player.giveItemStack(
-                CUTSCENE_LIBRARY_TOOL.getDefaultStack());
+    private static void giveDirectorTools(ServerPlayerEntity p){
+        for(Item item:new Item[]{NPC_CREATOR,NPC_PATH_TOOL,NPC_EDITOR_TOOL,CAMERA_TOOL,BUILD_LAYER_TOOL,NPC_STATE_TOOL,NPC_LINK_TOOL,SCRIPT_COMPUTER_ITEM,LIFT_BUTTON_BINDER,LIFT_ITEM,LIFT_PANEL_ITEM,LIFT_PANEL_TOOL,LIFT_EDITOR_TOOL,MFL_SPAWN_EGG,MFL_EDITOR_TOOL,MFL_PATH_TOOL,VHS_CASSETTE,TELEVISION_ITEM,CASSETTE_DRIVE_ITEM,TV_LINK_TOOL,ANIMATION_CONDITION_TOOL,ENTITY_SHADER_TOOL,CUTSCENE_LIBRARY_TOOL})p.giveItemStack(item.getDefaultStack());
+        p.sendMessage(Text.literal("§8[§cПятый§8] §7Режиссёрские инструменты выданы."),false);
     }
 }

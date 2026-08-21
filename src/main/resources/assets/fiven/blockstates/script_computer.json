@@ -1,1 +1,8 @@
-{"variants": {"": {"model": "fiven:block/script_computer"}}}
+{
+  "variants": {
+    "facing=north": { "model": "fiven:block/script_computer" },
+    "facing=east": { "model": "fiven:block/script_computer", "y": 90 },
+    "facing=south": { "model": "fiven:block/script_computer", "y": 180 },
+    "facing=west": { "model": "fiven:block/script_computer", "y": 270 }
+  }
+}
