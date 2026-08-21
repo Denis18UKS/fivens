@@ -9,21 +9,24 @@
       }
     },
     "doors_open": {
-      "loop": "hold_on_last_frame",
-      "animation_length": 1.5,
+      "loop": true,
       "bones": {
-        "right_door_lift": {
-          "scale": {
-            "0.0": { "vector": [1, 1, 1] },
-            "1.5": { "vector": [0.2, 1, 1] }
-          }
-        },
-        "left_door_lift": {
-          "scale": {
-            "0.0": { "vector": [1, 1, 1] },
-            "1.5": { "vector": [0.2, 1, 1] }
-          }
-        }
+        "right_door_lift": { "scale": [0.2, 1, 1] },
+        "left_door_lift": { "scale": [0.2, 1, 1] }
+      }
+    },
+    "animation_doors_open": {
+      "animation_length": 2.2917,
+      "bones": {
+        "right_door_lift": {"scale":{"0.0":{"post":{"vector":[1,1,1]},"lerp_mode":"catmullrom"},"1.5":{"post":{"vector":[0.2,1,1]},"lerp_mode":"catmullrom"}}},
+        "left_door_lift": {"scale":{"0.0":{"post":{"vector":[1,1,1]},"lerp_mode":"catmullrom"},"1.5":{"post":{"vector":[0.2,1,1]},"lerp_mode":"catmullrom"}}}
+      }
+    },
+    "animation_doors_close": {
+      "animation_length": 2.2917,
+      "bones": {
+        "right_door_lift": {"scale":{"0.0":{"post":{"vector":[0.2,1,1]},"lerp_mode":"catmullrom"},"1.5":{"post":{"vector":[1,1,1]},"lerp_mode":"catmullrom"}}},
+        "left_door_lift": {"scale":{"0.0":{"post":{"vector":[0.2,1,1]},"lerp_mode":"catmullrom"},"1.5":{"post":{"vector":[1,1,1]},"lerp_mode":"catmullrom"}}}
       }
     }
   }
