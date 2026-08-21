@@ -9,9 +9,9 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
-import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 import ru.fifth.horror.entity.DirectorNpcEntity;
+import ru.fifth.horror.script.FifthScriptEngine;
 
 import java.util.Map;
 import java.util.UUID;
@@ -25,7 +25,9 @@ public class NpcPathToolItem extends Item {
     private record Selection(UUID uuid, String npcId) {}
     private static final Map<UUID, Selection> SELECTIONS = new ConcurrentHashMap<>();
 
-    public NpcPathToolItem(Settings settings) { super(settings); }
+    public NpcPathToolItem(Settings settings) {
+        super(settings);
+    }
 
     @Override
     public ActionResult useOnEntity(ItemStack stack, PlayerEntity user, LivingEntity entity, Hand hand) {
@@ -34,8 +36,8 @@ public class NpcPathToolItem extends Item {
 
         Selection selection = new Selection(npc.getUuid(), npc.getNpcId());
         SELECTIONS.put(user.getUuid(), selection);
+        FifthScriptEngine.indexNpc(npc);
 
-        // Write to both references deliberately. In creative mode the stack argument can be replaced during inventory sync.
         remember(stack, selection);
         remember(user.getStackInHand(hand), selection);
         user.sendMessage(Text.literal("§8[§cПятый§8] §7NPC маршрута: §f" + npc.getNpcId() + " §8(выбор сохранён)"), true);
@@ -56,7 +58,6 @@ public class NpcPathToolItem extends Item {
             return ActionResult.FAIL;
         }
 
-        // Restore NBT if a creative/inventory sync replaced the original stack.
         remember(stack, selection);
         SELECTIONS.put(player.getUuid(), selection);
 
@@ -70,9 +71,9 @@ public class NpcPathToolItem extends Item {
             npc.clearPath();
             player.sendMessage(Text.literal("§7Маршрут §f" + npc.getNpcId() + " §7очищен."), true);
         } else {
-            Vec3d p = Vec3d.ofBottomCenter(context.getBlockPos().offset(context.getSide()));
-            npc.addPathPoint(p);
-            player.sendMessage(Text.literal("§7" + npc.getNpcId() + " §8• §7точка §f#" + npc.getPathPoints().size() + " §8• §7" + fmt(p)), true);
+            Vec3d point = Vec3d.ofBottomCenter(context.getBlockPos().offset(context.getSide()));
+            npc.addPathPoint(point);
+            player.sendMessage(Text.literal("§7" + npc.getNpcId() + " §8• §7точка §f#" + npc.getPathPoints().size() + " §8• §7" + fmt(point)), true);
         }
         return ActionResult.CONSUME;
     }
@@ -93,11 +94,8 @@ public class NpcPathToolItem extends Item {
     }
 
     private static DirectorNpcEntity resolve(ServerWorld world, Selection selection) {
-        if (world.getEntity(selection.uuid) instanceof DirectorNpcEntity npc) return npc;
-        if (selection.npcId == null || selection.npcId.isBlank()) return null;
-        Box all = new Box(-30_000_000, -2048, -30_000_000, 30_000_000, 4096, 30_000_000);
-        var list = world.getEntitiesByClass(DirectorNpcEntity.class, all, n -> selection.npcId.equals(n.getNpcId()));
-        return list.isEmpty() ? null : list.get(0);
+        DirectorNpcEntity npc = FifthScriptEngine.findNpc(world.getServer(), selection.uuid, selection.npcId);
+        return npc != null && npc.getWorld() == world ? npc : null;
     }
 
     private static String fmt(Vec3d p) {
