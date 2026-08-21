@@ -21,6 +21,8 @@ import net.minecraft.util.math.Vec3d;
 import ru.fifth.horror.block.ClockArmsBlock;
 import ru.fifth.horror.block.LiftBlockEntity;
 import ru.fifth.horror.effect.EntityEffectManager;
+import ru.fifth.horror.entity.MflHidingManager;
+import ru.fifth.horror.item.MflHidingToolItem;
 import ru.fifth.horror.lift.LiftManager;
 import ru.fifth.horror.network.FifthNetworking;
 
@@ -30,10 +32,15 @@ public final class FivenExtraContent implements ModInitializer {
             new ClockArmsBlock(AbstractBlock.Settings.create().strength(1.2f).nonOpaque()));
     public static final Item CLOCK_ARMS_ITEM = Registry.register(Registries.ITEM, FifthMod.id("clock_arms"),
             new BlockItem(CLOCK_ARMS, new Item.Settings().maxCount(64)));
+    public static final Item MFL_HIDING_TOOL = Registry.register(Registries.ITEM, FifthMod.id("mfl_hiding_tool"),
+            new MflHidingToolItem(new Item.Settings().maxCount(1)));
 
     @Override
     public void onInitialize() {
-        ItemGroupEvents.modifyEntriesEvent(FifthMod.FIFTH_ITEM_GROUP_KEY).register(entries -> entries.add(CLOCK_ARMS_ITEM));
+        ItemGroupEvents.modifyEntriesEvent(FifthMod.FIFTH_ITEM_GROUP_KEY).register(entries -> {
+            entries.add(CLOCK_ARMS_ITEM);
+            entries.add(MFL_HIDING_TOOL);
+        });
         registerCommands();
     }
 
@@ -75,6 +82,10 @@ public final class FivenExtraContent implements ModInitializer {
                                         ctx.getSource().sendFeedback(() -> Text.literal("§8[§cFiven§8] §7Очищено шейдер-эффектов: §f" + count + "§7. Защищённые сущности сохранены."), false);
                                         return Math.max(1, count);
                                     })))
+                    .then(CommandManager.literal("hiding-zones")
+                            .requires(source -> source.hasPermissionLevel(2))
+                            .then(CommandManager.literal("status").executes(ctx -> hidingStatus(ctx.getSource())))
+                            .then(CommandManager.literal("clear").executes(ctx -> clearHidingZones(ctx.getSource()))))
                     .then(CommandManager.literal("lift-type")
                             .requires(source -> source.hasPermissionLevel(2))
                             .then(CommandManager.literal("normal").executes(ctx -> setNearestLiftType(ctx.getSource(), false)))
@@ -100,6 +111,30 @@ public final class FivenExtraContent implements ModInitializer {
             return 1;
         } catch (Exception e) {
             source.sendError(Text.literal("TPE доступен только игроку."));
+            return 0;
+        }
+    }
+
+    private static int hidingStatus(ServerCommandSource source) {
+        try {
+            ServerPlayerEntity player = source.getPlayerOrThrow();
+            int count = MflHidingManager.count(player.getServerWorld());
+            source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §7Зон укрытия MFL в этом измерении: §f" + count), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendError(Text.literal("Команда доступна только игроку."));
+            return 0;
+        }
+    }
+
+    private static int clearHidingZones(ServerCommandSource source) {
+        try {
+            ServerPlayerEntity player = source.getPlayerOrThrow();
+            int removed = MflHidingManager.clear(player.getServerWorld());
+            source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §7Удалено зон укрытия MFL: §f" + removed), false);
+            return Math.max(1, removed);
+        } catch (Exception e) {
+            source.sendError(Text.literal("Команда доступна только игроку."));
             return 0;
         }
     }
