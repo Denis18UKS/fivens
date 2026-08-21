@@ -1,7 +1,8 @@
 {
   "variants": {
-    "": {
-      "model": "fiven:block/cassette_drive"
-    }
+    "facing=north": { "model": "fiven:block/cassette_drive" },
+    "facing=east": { "model": "fiven:block/cassette_drive", "y": 90 },
+    "facing=south": { "model": "fiven:block/cassette_drive", "y": 180 },
+    "facing=west": { "model": "fiven:block/cassette_drive", "y": 270 }
   }
 }

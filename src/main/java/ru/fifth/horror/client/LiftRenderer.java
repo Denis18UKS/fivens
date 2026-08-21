@@ -1,9 +1,11 @@
 package ru.fifth.horror.client;
 
-import net.minecraft.client.render.entity.EntityRendererFactory;
-import ru.fifth.horror.entity.LiftEntity;
-import software.bernie.geckolib.renderer.GeoEntityRenderer;
+import net.minecraft.client.render.block.entity.BlockEntityRendererFactory;
+import ru.fifth.horror.block.LiftBlockEntity;
+import software.bernie.geckolib.renderer.GeoBlockRenderer;
 
-public final class LiftRenderer extends GeoEntityRenderer<LiftEntity> {
-    public LiftRenderer(EntityRendererFactory.Context context) { super(context, new LiftModel()); this.shadowRadius = 0.0f; }
+public final class LiftRenderer extends GeoBlockRenderer<LiftBlockEntity> {
+    public LiftRenderer(BlockEntityRendererFactory.Context context) {
+        super(new LiftModel());
+    }
 }

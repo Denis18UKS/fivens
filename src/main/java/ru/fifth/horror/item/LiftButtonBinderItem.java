@@ -11,20 +11,21 @@ import net.minecraft.text.Text;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.TypedActionResult;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
+import ru.fifth.horror.FifthMod;
+import ru.fifth.horror.block.LiftBlockEntity;
 import ru.fifth.horror.entity.LiftEntity;
 import ru.fifth.horror.lift.LiftManager;
 
-import java.util.UUID;
-
-/** Uses the VANILLA stone button; this item only rebinds it to a lift/floor. */
+/** Uses a vanilla stone button; this tool only selects a physical lift block and binds a floor. */
 public final class LiftButtonBinderItem extends Item {
-    public LiftButtonBinderItem(Settings settings) {
-        super(settings);
-    }
+    public LiftButtonBinderItem(Settings settings) { super(settings); }
 
     @Override
     public ActionResult useOnEntity(ItemStack stack, PlayerEntity user, LivingEntity entity, Hand hand) {
+        // Legacy lift entities can still be selected so old worlds can be migrated, but new lifts are blocks.
+        if (entity instanceof LiftEntity legacy) return selectLift(stack, user, legacy);
         return ActionResult.PASS;
     }
 
@@ -32,29 +33,40 @@ public final class LiftButtonBinderItem extends Item {
     public ActionResult useOnBlock(ItemUsageContext ctx) {
         PlayerEntity player = ctx.getPlayer();
         if (player == null) return ActionResult.PASS;
-        if (!ctx.getWorld().getBlockState(ctx.getBlockPos()).isOf(Blocks.STONE_BUTTON)) return ActionResult.PASS;
-        if (ctx.getWorld().isClient) return ActionResult.SUCCESS;
-        if (!(ctx.getWorld() instanceof ServerWorld serverWorld)) return ActionResult.PASS;
+        World world = ctx.getWorld();
+        BlockPos clicked = ctx.getBlockPos();
+        ItemStack stack = ctx.getStack();
 
-        var nbt = ctx.getStack().getOrCreateNbt();
-        if (!nbt.contains("FivenLiftUuid")) {
-            player.sendMessage(Text.literal("§8[§cFiven§8] §7Сначала выбери лифт: ПКМ предметом по лифту."), true);
+        if (world.getBlockState(clicked).isOf(FifthMod.LIFT_BLOCK)) {
+            if (!world.isClient && world.getBlockEntity(clicked) instanceof LiftBlockEntity lift) {
+                var nbt = stack.getOrCreateNbt();
+                nbt.putString("FivenLiftWorld", world.getRegistryKey().getValue().toString());
+                nbt.putLong("FivenLiftPos", clicked.asLong());
+                nbt.remove("FivenLiftUuid");
+                player.sendMessage(Text.literal("§8[§cFiven§8] §7Выбран блок лифта: §f" + lift.getLiftId() + "§7. ПКМ в воздухе меняет этаж."), true);
+            }
+            return ActionResult.success(world.isClient);
+        }
+
+        if (!world.getBlockState(clicked).isOf(Blocks.STONE_BUTTON)) return ActionResult.PASS;
+        if (world.isClient) return ActionResult.SUCCESS;
+        if (!(world instanceof ServerWorld serverWorld)) return ActionResult.PASS;
+
+        var nbt = stack.getOrCreateNbt();
+        if (!nbt.contains("FivenLiftWorld") || !nbt.contains("FivenLiftPos")) {
+            player.sendMessage(Text.literal("§8[§cFiven§8] §7Сначала ПКМ этим инструментом по блоку лифта."), true);
             return ActionResult.SUCCESS;
         }
-
-        UUID liftUuid;
-        try {
-            liftUuid = UUID.fromString(nbt.getString("FivenLiftUuid"));
-        } catch (IllegalArgumentException invalidUuid) {
-            nbt.remove("FivenLiftUuid");
-            player.sendMessage(Text.literal("§8[§cFiven§8] §cПривязка лифта повреждена. Выбери лифт заново."), true);
-            return ActionResult.FAIL;
-        }
-
+        String liftWorld = nbt.getString("FivenLiftWorld");
+        BlockPos liftPos = BlockPos.fromLong(nbt.getLong("FivenLiftPos"));
         int floor = nbt.contains("FivenBindFloor") ? nbt.getInt("FivenBindFloor") : 1;
         floor = Math.max(1, Math.min(9, floor));
-        LiftManager.bindButton(serverWorld.getServer(), serverWorld, ctx.getBlockPos(), liftUuid, floor);
-        player.sendMessage(Text.literal("§8[§cFiven§8] §7Каменная кнопка привязана к этажу §c" + floor + "§7."), true);
+        if (LiftManager.findLift(serverWorld.getServer(), liftWorld, liftPos) == null) {
+            player.sendMessage(Text.literal("§8[§cFiven§8] §cВыбранный блок лифта больше не найден. Выбери его заново."), true);
+            return ActionResult.FAIL;
+        }
+        LiftManager.bindButton(serverWorld.getServer(), serverWorld, clicked, liftWorld, liftPos, floor);
+        player.sendMessage(Text.literal("§8[§cFiven§8] §7Каменная кнопка теперь вызывает лифт на этаж §c" + floor + "§7 и не используется как redstone-кнопка."), true);
         return ActionResult.SUCCESS;
     }
 
@@ -70,10 +82,11 @@ public final class LiftButtonBinderItem extends Item {
         return TypedActionResult.success(stack, world.isClient);
     }
 
+    /** Legacy migration helper for old entity lifts. */
     public static ActionResult selectLift(ItemStack stack, PlayerEntity player, LiftEntity lift) {
         if (!player.getWorld().isClient) {
             stack.getOrCreateNbt().putString("FivenLiftUuid", lift.getUuidAsString());
-            player.sendMessage(Text.literal("§8[§cFiven§8] §7Выбран лифт: §f" + lift.getLiftId() + "§7. ПКМ в воздухе меняет этаж."), true);
+            player.sendMessage(Text.literal("§8[§cFiven§8] §eВыбран старый Entity-лифт. Поставь новый блок лифта и перепривяжи кнопку."), true);
         }
         return ActionResult.SUCCESS;
     }
