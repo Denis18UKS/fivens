@@ -1,12 +1,13 @@
 package ru.fifth.horror.script;
 
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.text.Text;
+import net.minecraft.util.TypeFilter;
 import net.minecraft.util.WorldSavePath;
-import net.minecraft.util.math.Box;
 import ru.fifth.horror.cutscene.CutsceneManager;
 import ru.fifth.horror.entity.DirectorNpcEntity;
 import ru.fifth.horror.structure.StructureLayerManager;
@@ -58,7 +59,6 @@ public final class FifthScriptEngine {
         if (script == null) { reload(server); script = SCRIPTS.get(key); }
         if (script == null) { if (executor != null) executor.sendMessage(Text.literal("§cСценарий не найден: " + name), false); return; }
         String onRun = extractBlock(script, "onRun");
-        // A pure onNpcTick program needs an NPC context. Do not silently execute its body with self=null.
         if (onRun.isBlank() && !extractBlock(script, "onNpcTick").isBlank()) {
             if (executor != null) executor.sendMessage(Text.literal("§eЭтот сценарий содержит onNpcTick(). Выбери NPC в библиотеке компьютера и нажми «Запустить»."), false);
             return;
@@ -76,18 +76,13 @@ public final class FifthScriptEngine {
         String onRun = extractBlock(script, "onRun");
         String onNpcTick = extractBlock(script, "onNpcTick");
 
-        if (!onRun.isBlank()) {
-            runBlock(server, executor, onRun, npc);
-        } else if (onNpcTick.isBlank()) {
-            // Flat scripts such as npc("self")->moveTo(...) execute immediately for the selected NPC.
-            runBlock(server, executor, script, npc);
-        }
+        if (!onRun.isBlank()) runBlock(server, executor, onRun, npc);
+        else if (onNpcTick.isBlank()) runBlock(server, executor, script, npc);
 
         if (!onNpcTick.isBlank()) {
-            // Selecting an NPC + launching an onNpcTick script is the explicit act that turns the statue into a programmed NPC.
             npc.setAiScript(key);
             npc.setAiEnabled(true);
-            runBlock(server, executor, onNpcTick, npc); // first tick immediately, then entity tick continues it
+            runBlock(server, executor, onNpcTick, npc);
             if (executor != null) executor.sendMessage(Text.literal("§8[§cПятый§8] §7NPC §f" + npc.getNpcId() + " §7привязан к §f" + key + " §7и ИИ запущен."), false);
         } else if (executor != null) {
             executor.sendMessage(Text.literal("§8[§cПятый§8] §7Код выполнен для NPC §f" + npc.getNpcId() + "§7."), false);
@@ -112,7 +107,6 @@ public final class FifthScriptEngine {
         for (String raw : block.split("[\\r\\n]+")) {
             String line = raw.trim(); if (line.isBlank() || line.startsWith("//") || line.equals("{") || line.equals("}")) continue;
             if (line.startsWith("if (flag(")) {
-                // compact one-line condition: if (flag("x")) npc(...);
                 int q1=line.indexOf('"'), q2=line.indexOf('"',q1+1), close=line.indexOf(')', q2);
                 if(q1>0&&q2>q1&&FLAGS.getOrDefault(line.substring(q1+1,q2),false)) runLine(server, executor, line.substring(close+1).trim(), self);
                 continue;
@@ -147,17 +141,21 @@ public final class FifthScriptEngine {
         } catch (Exception ignored) {}
     }
 
+    /** Searches only loaded DirectorNpcEntity instances and stops after the first match. */
     public static DirectorNpcEntity findNpc(MinecraftServer server, String id) {
-        Box all = new Box(-30_000_000, -2048, -30_000_000, 30_000_000, 4096, 30_000_000);
+        if(server==null||id==null||id.isBlank())return null;
+        TypeFilter<Entity,DirectorNpcEntity> filter=TypeFilter.instanceOf(DirectorNpcEntity.class);
         for (ServerWorld w : server.getWorlds()) {
-            List<DirectorNpcEntity> list = w.getEntitiesByClass(DirectorNpcEntity.class, all, n -> id.equals(n.getNpcId()));
-            if (!list.isEmpty()) return list.get(0);
+            List<DirectorNpcEntity> result=new ArrayList<>(1);
+            w.collectEntitiesByType(filter,n -> id.equals(n.getNpcId()),result,1);
+            if(!result.isEmpty())return result.get(0);
         }
         return null;
     }
 
     /** Exact library lookup by UUID, with ID fallback for worlds reloaded from disk. */
     public static DirectorNpcEntity findNpc(MinecraftServer server, UUID uuid, String idFallback) {
+        if (server==null)return null;
         if (uuid != null) {
             for (ServerWorld w : server.getWorlds()) {
                 if (w.getEntity(uuid) instanceof DirectorNpcEntity npc) return npc;
