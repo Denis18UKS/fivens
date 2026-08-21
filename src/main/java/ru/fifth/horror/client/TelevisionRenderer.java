@@ -1,5 +1,6 @@
 package ru.fifth.horror.client;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.render.OverlayTexture;
 import net.minecraft.client.render.RenderLayer;
@@ -19,42 +20,39 @@ import ru.fifth.horror.block.TelevisionBlockEntity;
 
 import java.util.Random;
 
-/** Draws VHS content only inside the black 14x14-pixel screen area of the physical television. */
+/**
+ * Physical CRT overlay renderer. The same static render path is callable from the dispatcher mixin,
+ * so TV playback does not depend solely on Fabric's BER registry being invoked in a particular client setup.
+ */
 public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionBlockEntity> {
-    private final TextRenderer text;
-
-    /* The north-face TV texture uses a 16x16 region; its black screen is pixels 1..14 on both axes. */
     private static final float SCREEN_HALF = 7.0f / 16.0f;
-    private static final int SCREEN_LIGHT = 0x00F000F0; // CRT is self-lit; never disappear in a dark horror room.
+    private static final int SCREEN_LIGHT = 0x00F000F0;
 
-    public TelevisionRenderer(BlockEntityRendererFactory.Context ctx) { text = ctx.getTextRenderer(); }
+    public TelevisionRenderer(BlockEntityRendererFactory.Context ignored) {}
 
     @Override
     public void render(TelevisionBlockEntity be, float delta, MatrixStack ms, VertexConsumerProvider vertices, int light, int overlay) {
-        // The VHS session packet and the BlockEntity update packet are independent network messages.
-        // Never reject a valid playback session just because BE NBT arrived one frame later.
+        renderScreen(be, delta, ms, vertices);
+    }
+
+    /** Called both from the normal renderer and from TelevisionRenderDispatcherMixin. */
+    public static void renderScreen(TelevisionBlockEntity be, float delta, MatrixStack ms, VertexConsumerProvider vertices) {
+        if (be == null || VhsWorldCapture.isCapturing()) return;
         VhsPlayback.Session session = VhsPlayback.session(be.getPos());
         if (be.getRecording().isBlank() && be.getStaticTicks() <= 0 && session == null) return;
 
-        // Never draw TV surfaces into the secondary VHS camera itself.
-        if (VhsWorldCapture.isCapturing()) return;
-
+        TextRenderer text = MinecraftClient.getInstance().textRenderer;
         Direction facing = be.getCachedState().contains(TelevisionBlock.FACING)
                 ? be.getCachedState().get(TelevisionBlock.FACING) : Direction.NORTH;
-        float yaw = switch (facing) { case SOUTH -> 180f; case EAST -> -90f; case WEST -> 90f; default -> 0f; };
 
         ms.push();
-        ms.translate(.5, .5, .5);
-        ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(yaw));
-        // A tiny offset in front of the physical NORTH/front face avoids z-fighting with the TV texture.
-        ms.translate(0, 0, -.5015);
+        orientToPhysicalFront(ms, facing);
 
         boolean noise = session != null ? session.staticPhase() : be.getStaticTicks() > 0;
         Identifier captured = session == null ? null : VhsWorldCapture.texture(be.getPos());
 
         if (!noise && captured != null) drawVideoQuad(ms, vertices, captured, SCREEN_LIGHT);
 
-        // Overlay coordinates are scaled so the full 108px overlay fits inside the same physical 14/16 screen quad.
         float overlayScale = (SCREEN_HALF * 2.0f) / 108.0f;
         ms.scale(overlayScale, -overlayScale, overlayScale);
         Matrix4f matrix = ms.peek().getPositionMatrix();
@@ -62,24 +60,23 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         int y = -43;
 
         if (noise) {
-            drawBlack(matrix, vertices, SCREEN_LIGHT, x, y);
+            drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
             long seed = (be.getWorld() == null ? 0 : be.getWorld().getTime()) * 31L + be.getPos().asLong();
             Random r = new Random(seed);
             String chars = " ░▒▓";
             for (int row = 0; row < 12; row++) {
                 StringBuilder line = new StringBuilder();
                 for (int col = 0; col < 18; col++) line.append(chars.charAt(r.nextInt(chars.length())));
-                int g = 70 + r.nextInt(120);
+                int g = 80 + r.nextInt(145);
                 int grey = 0xFF000000 | (g << 16) | (g << 8) | g;
                 text.draw(line.toString(), x, y + 4 + row * 7, grey, false, matrix, vertices,
                         TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             }
-            text.draw("NO SIGNAL", -27, -4, 0xFFBFBFBF, false, matrix, vertices,
+            text.draw("NO SIGNAL", -27, -4, 0xFFF0F0F0, false, matrix, vertices,
                     TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
         } else if (session != null) {
             if (captured == null) {
-                // If secondary world rendering fails on a driver, playback still remains visibly alive ON THE TV.
-                drawBlack(matrix, vertices, SCREEN_LIGHT, x, y);
+                drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
                 VhsPlayback.Sample s = session.sample();
                 float p = session.progress();
                 for (int row = 0; row < 11; row++) {
@@ -88,37 +85,57 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
                         double wave = Math.sin((col * .72) + (row * .41) + (p * 22) + (s.yaw() * .025) + s.x() * .03 + s.z() * .02);
                         line.append(wave > .55 ? '▓' : wave > 0 ? '▒' : wave > -.55 ? '░' : ' ');
                     }
-                    int g = Math.max(55, Math.min(205, (int) (120 + Math.sin(row + p * 17) * 55)));
+                    int g = Math.max(70, Math.min(225, (int) (135 + Math.sin(row + p * 17) * 65)));
                     int color = 0xFF000000 | (g << 16) | (g << 8) | g;
                     text.draw(line.toString(), x, y + 4 + row * 7, color, false, matrix, vertices,
                             TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
                 }
             } else {
                 for (int row = 0; row < 12; row += 2) {
-                    text.draw("──────────────────", x, y + 4 + row * 7, 0x2D000000, false, matrix, vertices,
+                    text.draw("──────────────────", x, y + 4 + row * 7, 0x55000000, false, matrix, vertices,
                             TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
                 }
             }
 
-            text.draw("REC", x + 2, y + 2, 0xFFE6E6E6, false, matrix, vertices,
+            text.draw("REC", x + 2, y + 2, 0xFFF2F2F2, false, matrix, vertices,
                     TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             String sub = session.subtitle();
             if (!sub.isBlank()) {
                 String clipped = sub.length() > 25 ? sub.substring(0, 25) : sub;
-                text.draw(Text.literal(clipped), x + 2, y + 76, 0xFFE0E0E0, false, matrix, vertices,
+                text.draw(Text.literal(clipped), x + 2, y + 76, 0xFFF0F0F0, false, matrix, vertices,
                         TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             }
         } else {
-            // Server BE says a recording is active even if the VHS session packet was missed: show an explicit state,
-            // rather than silently leaving the TV's black texture unchanged.
-            drawBlack(matrix, vertices, SCREEN_LIGHT, x, y);
-            text.draw("WAITING FOR VHS", x + 4, -4, 0xFFBFBFBF, false, matrix, vertices,
+            drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
+            text.draw("WAITING FOR VHS", x + 4, -4, 0xFFE0E0E0, false, matrix, vertices,
                     TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
         }
         ms.pop();
     }
 
-    private void drawBlack(Matrix4f matrix, VertexConsumerProvider vertices, int light, int x, int y) {
+    /**
+     * FACING is the direction the TV front looks toward. Using explicit transforms avoids model-JSON rotation sign
+     * ambiguities and keeps the VHS quad glued to the physical front on all four horizontal facings.
+     */
+    private static void orientToPhysicalFront(MatrixStack ms, Direction facing) {
+        switch (facing) {
+            case SOUTH -> {
+                ms.translate(.5, .5, 1.0015);
+                ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(180f));
+            }
+            case EAST -> {
+                ms.translate(1.0015, .5, .5);
+                ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-90f));
+            }
+            case WEST -> {
+                ms.translate(-.0015, .5, .5);
+                ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(90f));
+            }
+            default -> ms.translate(.5, .5, -.0015);
+        }
+    }
+
+    private static void drawBlack(TextRenderer text, Matrix4f matrix, VertexConsumerProvider vertices, int light, int x, int y) {
         String black = "██████████████████";
         for (int row = 0; row < 13; row++) {
             text.draw(black, x, y + row * 7, 0xFF000000, false, matrix, vertices,
@@ -126,25 +143,31 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         }
     }
 
-    /** Exact 14/16 x 14/16 quad matching the black square in television.png. */
     private static void drawVideoQuad(MatrixStack ms, VertexConsumerProvider vertices, Identifier texture, int light) {
         VertexConsumer vc = vertices.getBuffer(RenderLayer.getEntityTranslucent(texture));
         Matrix4f m = ms.peek().getPositionMatrix();
         Matrix3f n = ms.peek().getNormalMatrix();
         float left = -SCREEN_HALF, right = SCREEN_HALF, top = SCREEN_HALF, bottom = -SCREEN_HALF;
-        vertex(vc, m, n, left, top, 0, 0, light);
-        vertex(vc, m, n, right, top, 1, 0, light);
-        vertex(vc, m, n, right, bottom, 1, 1, light);
-        vertex(vc, m, n, left, bottom, 0, 1, light);
+
+        // Front-facing winding.
+        vertex(vc, m, n, left, top, 0, 0, light, -1);
+        vertex(vc, m, n, right, top, 1, 0, light, -1);
+        vertex(vc, m, n, right, bottom, 1, 1, light, -1);
+        vertex(vc, m, n, left, bottom, 0, 1, light, -1);
+        // Back winding too: some shader/render-layer combinations enable culling unexpectedly.
+        vertex(vc, m, n, left, bottom, 0, 1, light, 1);
+        vertex(vc, m, n, right, bottom, 1, 1, light, 1);
+        vertex(vc, m, n, right, top, 1, 0, light, 1);
+        vertex(vc, m, n, left, top, 0, 0, light, 1);
     }
 
-    private static void vertex(VertexConsumer vc, Matrix4f m, Matrix3f n, float x, float y, float u, float v, int light) {
+    private static void vertex(VertexConsumer vc, Matrix4f m, Matrix3f n, float x, float y, float u, float v, int light, float nz) {
         vc.vertex(m, x, y, 0)
                 .color(255, 255, 255, 255)
                 .texture(u, v)
                 .overlay(OverlayTexture.DEFAULT_UV)
                 .light(light)
-                .normal(n, 0, 0, -1)
+                .normal(n, 0, 0, nz)
                 .next();
     }
 }
