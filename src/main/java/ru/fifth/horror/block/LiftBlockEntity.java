@@ -25,6 +25,8 @@ import java.util.Locale;
 /** Persistent state and GeckoLib controller for the physical lift block. */
 public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity {
     public static final int DEFAULT_OPEN_FLOOR_MASK = 0x1FF & ~(1 << 1) & ~(1 << 4) & ~(1 << 7);
+    /** Existing editor packets always contain a BlockPos. This impossible stage Y means "no relocation". */
+    public static final BlockPos NO_STAGE_ORIGIN = new BlockPos(0, -2048, 0);
     private static final RawAnimation CLOSED = RawAnimation.begin().thenLoop("doors_closed");
     private static final RawAnimation OPEN = RawAnimation.begin().thenLoop("doors_open");
     private static final RawAnimation OPEN_TRANSITION = RawAnimation.begin().thenPlay("animation_doors_open");
@@ -35,11 +37,7 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
     private int currentFloor = 1;
     private int targetFloor = 1;
     private int openFloorMask = DEFAULT_OPEN_FLOOR_MASK;
-    /**
-     * Optional minimum corner of the common lift-stage restore area.
-     * null is intentional and means: restore every saved floor exactly at the coordinates where that floor was captured.
-     * Older code synthesized pos-8,-1,-8 here, which could silently paste a floor into unrelated map geometry.
-     */
+    /** null = restore each floor at its captured origin; non-null = explicit common-stage minimum corner. */
     private BlockPos stageOrigin;
     private int autoCloseTicks;
     private boolean cursed;
@@ -95,20 +93,17 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
         dirtyAndSync();
     }
 
-    /** True only when the map author explicitly configured a relocated restore area. */
     public boolean hasStageOrigin() { return stageOrigin != null; }
-
-    /** Nullable on purpose. LiftManager must pass this value through unchanged to the floor-layer restore path. */
-    @Nullable
-    public BlockPos getConfiguredStageOrigin() { return stageOrigin; }
-
-    /** Display helper only; never use this value for an actual restore unless hasStageOrigin() is true. */
+    @Nullable public BlockPos getConfiguredStageOrigin() { return stageOrigin; }
     public BlockPos getStageDisplayOrigin() { return stageOrigin == null ? pos : stageOrigin; }
 
-    /** Backward source-compatibility for UI/status code. Restore code must use getConfiguredStageOrigin(). */
-    public BlockPos getStageOrigin() { return getStageDisplayOrigin(); }
+    /** Packet-compatible getter: sentinel means the relocation override is disabled. */
+    public BlockPos getStageOrigin() { return stageOrigin == null ? NO_STAGE_ORIGIN : stageOrigin; }
 
-    public void setStageOrigin(@Nullable BlockPos origin) { stageOrigin = origin == null ? null : origin.toImmutable(); dirtyAndSync(); }
+    public void setStageOrigin(@Nullable BlockPos origin) {
+        stageOrigin = origin == null || NO_STAGE_ORIGIN.equals(origin) ? null : origin.toImmutable();
+        dirtyAndSync();
+    }
     public void clearStageOrigin() { setStageOrigin(null); }
     public boolean isCursed() { return cursed; }
     public void setCursed(boolean value) { cursed = value; dirtyAndSync(); }
@@ -145,6 +140,7 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
         autoCloseTicks = Math.max(0, nbt.getInt("FivenAutoClose"));
         cursed = nbt.getBoolean("FivenCursed");
         stageOrigin = nbt.contains("FivenStageOrigin") ? BlockPos.fromLong(nbt.getLong("FivenStageOrigin")) : null;
+        if (NO_STAGE_ORIGIN.equals(stageOrigin)) stageOrigin = null;
     }
 
     private void setLiftIdWithoutSync(String value) {
