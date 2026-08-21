@@ -10,7 +10,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import ru.fifth.horror.network.FifthNetworking;
 
-/** Visual lift configuration: current floor, common stage origin and per-floor door permissions. */
+/** Visual lift configuration: current floor, common stage origin and per-floor availability. */
 public final class LiftEditorScreen extends HorrorScreen {
     private final Screen parent;
     private final int entityId;
@@ -25,7 +25,7 @@ public final class LiftEditorScreen extends HorrorScreen {
         this.parent = parent;
         this.entityId = entityId;
         this.floor = Math.max(1, Math.min(9, floor));
-        this.openMask = openMask;
+        this.openMask = openMask & 0x1FF;
         this.stage = stage;
     }
 
@@ -33,7 +33,7 @@ public final class LiftEditorScreen extends HorrorScreen {
         beginHorrorInit();
         int w = contentWidth(540), x = (width - w) / 2, y = safeTop(), gap = 6, bh = 20;
         addDrawableChild(HorrorButton.builder(Text.literal("Текущий этаж: " + floor), b -> {
-            floor = floor % 9 + 1; b.setMessage(Text.literal("Текущий этаж: " + floor));
+            floor = nextEnabledFloor(floor); b.setMessage(Text.literal("Текущий этаж: " + floor));
         }).dimensions(x, y, w, bh).build());
 
         int fw = (w - gap * 2) / 3;
@@ -41,13 +41,14 @@ public final class LiftEditorScreen extends HorrorScreen {
         yField = horrorField(x + fw + gap, y + 30, fw, bh, Integer.toString(stage.getY()), 12);
         zField = horrorField(x + (fw + gap) * 2, y + 30, fw, bh, Integer.toString(stage.getZ()), 12);
 
-        // 3x3 floor door matrix. Fits on Auto/2/3/4 because all coordinates are relative.
         int bw = (w - gap * 2) / 3;
         for (int i = 1; i <= 9; i++) {
             final int f = i;
             int col = (i - 1) % 3, row = (i - 1) / 3;
-            addDrawableChild(HorrorButton.builder(doorText(f), b -> {
-                openMask ^= 1 << (f - 1); b.setMessage(doorText(f));
+            addDrawableChild(HorrorButton.builder(floorText(f), b -> {
+                boolean enabled=((openMask>>(f-1))&1)!=0;
+                if(enabled&&f==floor){status="Нельзя сжечь этаж, который указан как текущий.";return;}
+                openMask ^= 1 << (f - 1); b.setMessage(floorText(f));
             }).dimensions(x + col * (bw + gap), y + 62 + row * 26, bw, bh).build());
         }
 
@@ -62,13 +63,21 @@ public final class LiftEditorScreen extends HorrorScreen {
         addDrawableChild(HorrorButton.builder(Text.literal("Назад"), b -> client.setScreen(parent)).dimensions(x, y + 204, w, bh).build());
     }
 
-    private Text doorText(int f) { return Text.literal("Этаж " + f + ": двери " + (((openMask >> (f - 1)) & 1) != 0 ? "ОТКР." : "ЗАКР.")); }
+    private Text floorText(int f) {
+        return Text.literal("Этаж " + f + ": " + (((openMask >> (f - 1)) & 1) != 0 ? "ДОСТУПЕН" : "§4СОЖЖЁН"));
+    }
+
+    private int nextEnabledFloor(int current){
+        for(int i=1;i<=9;i++){int f=((current+i-1)%9)+1;if(((openMask>>(f-1))&1)!=0)return f;}
+        return current;
+    }
 
     private void save() {
+        if(((openMask>>(floor-1))&1)==0){status="Текущий этаж должен быть доступен.";return;}
         try {
             stage = new BlockPos(Integer.parseInt(xField.getText()), Integer.parseInt(yField.getText()), Integer.parseInt(zField.getText()));
             PacketByteBuf out = PacketByteBufs.create();
-            out.writeVarInt(entityId); out.writeVarInt(floor); out.writeVarInt(openMask); out.writeBlockPos(stage);
+            out.writeVarInt(entityId); out.writeVarInt(floor); out.writeVarInt(openMask & 0x1FF); out.writeBlockPos(stage);
             ClientPlayNetworking.send(FifthNetworking.SAVE_LIFT_CONFIG, out);
             status = "Сохранено";
         } catch (NumberFormatException e) { status = "Координаты должны быть целыми числами"; }
