@@ -35,6 +35,11 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
     private int currentFloor = 1;
     private int targetFloor = 1;
     private int openFloorMask = DEFAULT_OPEN_FLOOR_MASK;
+    /**
+     * Optional minimum corner of the common lift-stage restore area.
+     * null is intentional and means: restore every saved floor exactly at the coordinates where that floor was captured.
+     * Older code synthesized pos-8,-1,-8 here, which could silently paste a floor into unrelated map geometry.
+     */
     private BlockPos stageOrigin;
     private int autoCloseTicks;
     private boolean cursed;
@@ -89,8 +94,22 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
         openFloorMask = open ? openFloorMask | bit : openFloorMask & ~bit;
         dirtyAndSync();
     }
-    public BlockPos getStageOrigin() { return stageOrigin == null ? pos.add(-8, -1, -8) : stageOrigin; }
-    public void setStageOrigin(BlockPos origin) { stageOrigin = origin == null ? null : origin.toImmutable(); dirtyAndSync(); }
+
+    /** True only when the map author explicitly configured a relocated restore area. */
+    public boolean hasStageOrigin() { return stageOrigin != null; }
+
+    /** Nullable on purpose. LiftManager must pass this value through unchanged to the floor-layer restore path. */
+    @Nullable
+    public BlockPos getConfiguredStageOrigin() { return stageOrigin; }
+
+    /** Display helper only; never use this value for an actual restore unless hasStageOrigin() is true. */
+    public BlockPos getStageDisplayOrigin() { return stageOrigin == null ? pos : stageOrigin; }
+
+    /** Backward source-compatibility for UI/status code. Restore code must use getConfiguredStageOrigin(). */
+    public BlockPos getStageOrigin() { return getStageDisplayOrigin(); }
+
+    public void setStageOrigin(@Nullable BlockPos origin) { stageOrigin = origin == null ? null : origin.toImmutable(); dirtyAndSync(); }
+    public void clearStageOrigin() { setStageOrigin(null); }
     public boolean isCursed() { return cursed; }
     public void setCursed(boolean value) { cursed = value; dirtyAndSync(); }
 
@@ -98,7 +117,10 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
 
     private void dirtyAndSync() {
         markDirty();
-        if (world != null && !world.isClient) world.updateListeners(pos, getCachedState(), getCachedState(), Block.NOTIFY_LISTENERS);
+        if (world != null && !world.isClient) {
+            if (world instanceof ServerWorld sw) sw.getChunkManager().markForUpdate(pos);
+            world.updateListeners(pos, getCachedState(), getCachedState(), Block.NOTIFY_LISTENERS);
+        }
     }
 
     @Override
