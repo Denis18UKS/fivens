@@ -21,21 +21,27 @@ public final class MflTestCommands implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(
-                CommandManager.literal("fiven")
-                        .then(CommandManager.literal("mfl")
-                                .requires(source -> source.hasPermissionLevel(2))
-                                .then(CommandManager.literal("screamer")
-                                        .executes(ctx -> screamer(ctx.getSource())))
-                                .then(CommandManager.literal("chase-test")
-                                        .then(CommandManager.literal("start")
-                                                .executes(ctx -> startChase(ctx.getSource(), null))
-                                                .then(CommandManager.argument("player", EntityArgumentType.player())
-                                                        .executes(ctx -> startChase(ctx.getSource(), EntityArgumentType.getPlayer(ctx, "player")))))
-                                        .then(CommandManager.literal("stop")
-                                                .executes(ctx -> stopChase(ctx.getSource())))
-                                        .then(CommandManager.literal("status")
-                                                .executes(ctx -> status(ctx.getSource()))))))));
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            var start = CommandManager.literal("start")
+                    .executes(ctx -> startChase(ctx.getSource(), null))
+                    .then(CommandManager.argument("player", EntityArgumentType.player())
+                            .executes(ctx -> startChase(ctx.getSource(), EntityArgumentType.getPlayer(ctx, "player"))));
+
+            var chaseTest = CommandManager.literal("chase-test")
+                    .then(start)
+                    .then(CommandManager.literal("stop")
+                            .executes(ctx -> stopChase(ctx.getSource())))
+                    .then(CommandManager.literal("status")
+                            .executes(ctx -> status(ctx.getSource())));
+
+            var mfl = CommandManager.literal("mfl")
+                    .requires(source -> source.hasPermissionLevel(2))
+                    .then(CommandManager.literal("screamer")
+                            .executes(ctx -> screamer(ctx.getSource())))
+                    .then(chaseTest);
+
+            dispatcher.register(CommandManager.literal("fiven").then(mfl));
+        });
     }
 
     private static int screamer(ServerCommandSource source) {
