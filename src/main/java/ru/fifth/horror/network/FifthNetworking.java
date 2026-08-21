@@ -69,17 +69,19 @@ public final class FifthNetworking {
     public static void registerServer() {
         ServerPlayNetworking.registerGlobalReceiver(SAVE_LIFT_CONFIG, (server, player, handler, buf, responseSender) -> {
             int id = buf.readVarInt();
+            String liftId = buf.readString(64);
             int floor = buf.readVarInt();
             int mask = buf.readVarInt();
             BlockPos stage = buf.readBlockPos();
             server.execute(() -> {
                 if (!player.hasPermissionLevel(2)) return;
                 if (player.getWorld().getEntityById(id) instanceof LiftEntity lift) {
+                    lift.setLiftId(liftId);
                     lift.setCurrentFloor(floor);
                     lift.setTargetFloor(floor);
                     for (int f = 1; f <= 9; f++) lift.setOpenOnFloor(f, (mask & (1 << (f - 1))) != 0);
                     lift.setStageOrigin(stage);
-                    player.sendMessage(Text.literal("§8[§cFiven§8] §7Лифт сохранён."), true);
+                    player.sendMessage(Text.literal("§8[§cFiven§8] §7Лифт §f" + lift.getLiftId() + " §7сохранён."), true);
                 }
             });
         });
@@ -217,7 +219,6 @@ public final class FifthNetworking {
 
                 if ("door".equals(action) || "enable".equals(action)) {
                     if (!player.hasPermissionLevel(2)) return;
-                    // Keep the panel's old mask for backwards-compatible saves, but the linked lift is authoritative.
                     panel.setEnabled(floor, value != 0);
                     if (lift != null) lift.setOpenOnFloor(floor, value != 0);
                     return;
@@ -333,7 +334,7 @@ public final class FifthNetworking {
         ServerPlayNetworking.registerGlobalReceiver(NPC_CONTROL, (server, player, handler, buf, responseSender) -> {
             int entityId = buf.readVarInt();
             String action = buf.readString(64);
-            buf.readString(256); // reserved argument for protocol compatibility
+            buf.readString(256);
             server.execute(() -> {
                 if (!player.hasPermissionLevel(2)) return;
                 if (!(player.getWorld().getEntityById(entityId) instanceof DirectorNpcEntity npc)) return;
@@ -433,6 +434,7 @@ public final class FifthNetworking {
     public static void openLiftEditor(ServerPlayerEntity player, LiftEntity lift) {
         PacketByteBuf out = PacketByteBufs.create();
         out.writeVarInt(lift.getId());
+        out.writeString(lift.getLiftId(), 64);
         out.writeVarInt(lift.getCurrentFloor());
         out.writeVarInt(lift.getOpenFloorMask());
         out.writeBlockPos(lift.getStageOrigin());
