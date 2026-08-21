@@ -86,7 +86,10 @@ public final class NpcEditorScreen extends HorrorScreen {
             if ((page + 1) * rows < filtered().size()) { page++; refresh(); }
         }).dimensions(x + w - 50, navY, 50, bh).build());
         addDrawableChild(HorrorButton.builder(Text.literal("🎨 Редактор PNG-текстуры"), b -> {
-            if (npc != null) client.setScreen(new NpcTextureEditorScreen(this, npc));
+            if (npc != null) {
+                NpcTextureEditorBootstrap.prepare(npc);
+                client.setScreen(new NpcTextureEditorScreen(this, npc));
+            }
         }).dimensions(x, navY + 27, half, bh).build());
         addDrawableChild(HorrorButton.builder(Text.literal("Назад"), b -> client.setScreen(parent))
                 .dimensions(x + half + gap, navY + 27, w - half - gap, bh).build());
