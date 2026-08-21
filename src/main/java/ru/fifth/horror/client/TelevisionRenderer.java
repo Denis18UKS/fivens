@@ -24,14 +24,19 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
     private final TextRenderer text;
 
     /* The north-face TV texture uses a 16x16 region; its black screen is pixels 1..14 on both axes. */
-    private static final float SCREEN_HALF = 7.0f / 16.0f; // 14/16 block-wide screen, centered at 0.5/0.5
+    private static final float SCREEN_HALF = 7.0f / 16.0f;
+    private static final int SCREEN_LIGHT = 0x00F000F0; // CRT is self-lit; never disappear in a dark horror room.
 
     public TelevisionRenderer(BlockEntityRendererFactory.Context ctx) { text = ctx.getTextRenderer(); }
 
     @Override
     public void render(TelevisionBlockEntity be, float delta, MatrixStack ms, VertexConsumerProvider vertices, int light, int overlay) {
-        if (be.getRecording().isBlank() && be.getStaticTicks() <= 0) return;
-        // Never draw a TV surface while the secondary VHS camera is capturing the world.
+        // The VHS session packet and the BlockEntity update packet are independent network messages.
+        // Never reject a valid playback session just because BE NBT arrived one frame later.
+        VhsPlayback.Session session = VhsPlayback.session(be.getPos());
+        if (be.getRecording().isBlank() && be.getStaticTicks() <= 0 && session == null) return;
+
+        // Never draw TV surfaces into the secondary VHS camera itself.
         if (VhsWorldCapture.isCapturing()) return;
 
         Direction facing = be.getCachedState().contains(TelevisionBlock.FACING)
@@ -39,19 +44,17 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         float yaw = switch (facing) { case SOUTH -> 180f; case EAST -> -90f; case WEST -> 90f; default -> 0f; };
 
         ms.push();
-        // Screen is centered on the front face of the 1x1 TV model, not at the old y=.73 offset.
         ms.translate(.5, .5, .5);
         ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(yaw));
-        // Place the quad a hair in front of the local NORTH face to avoid z-fighting.
+        // A tiny offset in front of the physical NORTH/front face avoids z-fighting with the TV texture.
         ms.translate(0, 0, -.5015);
 
-        VhsPlayback.Session session = VhsPlayback.session(be.getPos());
-        boolean noise = be.getStaticTicks() > 0 || (session != null && session.staticPhase());
+        boolean noise = session != null ? session.staticPhase() : be.getStaticTicks() > 0;
         Identifier captured = session == null ? null : VhsWorldCapture.texture(be.getPos());
 
-        if (!noise && captured != null) drawVideoQuad(ms, vertices, captured, light);
+        if (!noise && captured != null) drawVideoQuad(ms, vertices, captured, SCREEN_LIGHT);
 
-        // Overlay coordinates are scaled so the full 108px text width fits inside the same physical screen quad.
+        // Overlay coordinates are scaled so the full 108px overlay fits inside the same physical 14/16 screen quad.
         float overlayScale = (SCREEN_HALF * 2.0f) / 108.0f;
         ms.scale(overlayScale, -overlayScale, overlayScale);
         Matrix4f matrix = ms.peek().getPositionMatrix();
@@ -59,7 +62,7 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         int y = -43;
 
         if (noise) {
-            drawBlack(matrix, vertices, light, x, y);
+            drawBlack(matrix, vertices, SCREEN_LIGHT, x, y);
             long seed = (be.getWorld() == null ? 0 : be.getWorld().getTime()) * 31L + be.getPos().asLong();
             Random r = new Random(seed);
             String chars = " ░▒▓";
@@ -69,14 +72,14 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
                 int g = 70 + r.nextInt(120);
                 int grey = 0xFF000000 | (g << 16) | (g << 8) | g;
                 text.draw(line.toString(), x, y + 4 + row * 7, grey, false, matrix, vertices,
-                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             }
             text.draw("NO SIGNAL", -27, -4, 0xFFBFBFBF, false, matrix, vertices,
-                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
         } else if (session != null) {
             if (captured == null) {
-                // GPU/driver-safe fallback remains strictly on the television surface.
-                drawBlack(matrix, vertices, light, x, y);
+                // If secondary world rendering fails on a driver, playback still remains visibly alive ON THE TV.
+                drawBlack(matrix, vertices, SCREEN_LIGHT, x, y);
                 VhsPlayback.Sample s = session.sample();
                 float p = session.progress();
                 for (int row = 0; row < 11; row++) {
@@ -88,27 +91,29 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
                     int g = Math.max(55, Math.min(205, (int) (120 + Math.sin(row + p * 17) * 55)));
                     int color = 0xFF000000 | (g << 16) | (g << 8) | g;
                     text.draw(line.toString(), x, y + 4 + row * 7, color, false, matrix, vertices,
-                            TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+                            TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
                 }
             } else {
                 for (int row = 0; row < 12; row += 2) {
                     text.draw("──────────────────", x, y + 4 + row * 7, 0x2D000000, false, matrix, vertices,
-                            TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+                            TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
                 }
             }
 
             text.draw("REC", x + 2, y + 2, 0xFFE6E6E6, false, matrix, vertices,
-                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             String sub = session.subtitle();
             if (!sub.isBlank()) {
                 String clipped = sub.length() > 25 ? sub.substring(0, 25) : sub;
                 text.draw(Text.literal(clipped), x + 2, y + 76, 0xFFE0E0E0, false, matrix, vertices,
-                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             }
         } else {
-            drawBlack(matrix, vertices, light, x, y);
-            text.draw("REC  " + be.getRecording(), x + 3, -4, 0xFFBFBFBF, false, matrix, vertices,
-                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+            // Server BE says a recording is active even if the VHS session packet was missed: show an explicit state,
+            // rather than silently leaving the TV's black texture unchanged.
+            drawBlack(matrix, vertices, SCREEN_LIGHT, x, y);
+            text.draw("WAITING FOR VHS", x + 4, -4, 0xFFBFBFBF, false, matrix, vertices,
+                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
         }
         ms.pop();
     }
