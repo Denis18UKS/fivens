@@ -46,3 +46,5 @@ Windows:
 ```bat
 gradlew.bat clean build
 ```
+
+Every push to `main`/`fix/**` and every pull request is validated by the Java 17 Gradle build workflow.
