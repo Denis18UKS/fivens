@@ -1,7 +1,6 @@
 package ru.fifth.horror.item;
 
 import net.minecraft.block.Blocks;
-import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -21,13 +20,6 @@ import ru.fifth.horror.lift.LiftManager;
 /** Uses a vanilla stone button; this tool only selects a physical lift block and binds a floor. */
 public final class LiftButtonBinderItem extends Item {
     public LiftButtonBinderItem(Settings settings) { super(settings); }
-
-    @Override
-    public ActionResult useOnEntity(ItemStack stack, PlayerEntity user, LivingEntity entity, Hand hand) {
-        // Legacy lift entities can still be selected so old worlds can be migrated, but new lifts are blocks.
-        if (entity instanceof LiftEntity legacy) return selectLift(stack, user, legacy);
-        return ActionResult.PASS;
-    }
 
     @Override
     public ActionResult useOnBlock(ItemUsageContext ctx) {
@@ -82,7 +74,7 @@ public final class LiftButtonBinderItem extends Item {
         return TypedActionResult.success(stack, world.isClient);
     }
 
-    /** Legacy migration helper for old entity lifts. */
+    /** Legacy migration helper for old entity lifts. Legacy selection is routed through UseEntityCallback. */
     public static ActionResult selectLift(ItemStack stack, PlayerEntity player, LiftEntity lift) {
         if (!player.getWorld().isClient) {
             stack.getOrCreateNbt().putString("FivenLiftUuid", lift.getUuidAsString());
