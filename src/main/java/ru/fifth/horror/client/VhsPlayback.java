@@ -1,92 +1,79 @@
 package ru.fifth.horror.client;
 
-import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.util.math.BlockPos;
-import ru.fifth.horror.FifthMod;
 import ru.fifth.horror.cutscene.CutsceneDefinition;
-import ru.fifth.horror.mixin.GameRendererAccessor;
 
-/** Client-side VHS playback and screen-space distortion overlay. */
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Client-side timeline cache for VHS sessions attached to physical televisions.
+ * VHS never hijacks the player's fullscreen renderer; the TelevisionRenderer samples this timeline.
+ */
 public final class VhsPlayback {
-    private static boolean active;
-    private static int ticks;
-    private static int mode;
-    private static BlockPos tvPos;
-    private static boolean postProcessorLoaded;
-
+    public static final int STATIC_TICKS = 80;
+    private static final Map<Long, Session> TV = new HashMap<>();
     private VhsPlayback() {}
 
-    public static void start(CutsceneDefinition scene, int playbackMode, BlockPos tv) {
-        stop();
-        active = true;
-        ticks = 0;
-        mode = playbackMode == 1 ? 1 : 0;
-        tvPos = tv;
-
-        if (mode == 0 && scene != null) {
-            CutsceneDefinition copy = new CutsceneDefinition();
-            copy.id = scene.id;
-            copy.teleportPlayerAtEnd = false;
-            copy.hideHud = true;
-            copy.lockInput = true;
-            copy.keyframes.addAll(scene.keyframes);
-            CutscenePlayback.start(copy);
-        }
-
-        MinecraftClient client = MinecraftClient.getInstance();
-        try {
-            ((GameRendererAccessor) client.gameRenderer).fiven$loadPostProcessor(FifthMod.id("shaders/post/vhs.json"));
-            postProcessorLoaded = true;
-        } catch (Exception ignored) {
-            // The screen overlay below is a graceful fallback if another mod blocks post-processing.
-            postProcessorLoaded = false;
-        }
+    public static void start(CutsceneDefinition scene, int ignoredMode, BlockPos tvPos) {
+        if (scene == null || tvPos == null) return;
+        TV.put(tvPos.asLong(), new Session(copy(scene)));
     }
 
     public static void tick() {
-        if (!active) return;
-        ticks++;
-        if (mode == 0 && !CutscenePlayback.active()) stop();
-        if (ticks > 20 * 120) stop();
+        TV.entrySet().removeIf(e -> !e.getValue().tick());
     }
 
-    public static void stop() {
-        if (!active && !postProcessorLoaded) return;
-        active = false;
-        MinecraftClient client = MinecraftClient.getInstance();
-        if (postProcessorLoaded) {
-            try {
-                client.gameRenderer.disablePostProcessor();
-            } catch (Exception ignored) {}
+    /** Kept for the HUD callback. Deliberately draws nothing: VHS belongs to the TV surface. */
+    public static void render(DrawContext ignored) {}
+
+    public static Session session(BlockPos pos) { return pos == null ? null : TV.get(pos.asLong()); }
+
+    private static CutsceneDefinition copy(CutsceneDefinition scene) {
+        CutsceneDefinition out = new CutsceneDefinition();
+        out.id = scene.id;
+        out.hideHud = false;
+        out.lockInput = false;
+        out.teleportPlayerAtEnd = false;
+        for (CutsceneDefinition.Keyframe src : scene.keyframes) {
+            CutsceneDefinition.Keyframe k = new CutsceneDefinition.Keyframe(src.x, src.y, src.z, src.yaw, src.pitch, src.fov, Math.max(1, src.durationTicks));
+            k.subtitle = src.subtitle; k.event = src.event; out.keyframes.add(k);
         }
-        postProcessorLoaded = false;
+        return out;
     }
 
-    public static void render(DrawContext c) {
-        if (!active) return;
-        int w = c.getScaledWindowWidth();
-        int h = c.getScaledWindowHeight();
-
-        // Scanlines + travelling tracking tear. Kept even when the post chain works to make VHS readable at low GUI scales.
-        for (int y = ticks % 7; y < h; y += 7) c.fill(0, y, w, y + 1, 0x18000000);
-        int tearY = Math.floorMod(ticks * 3, Math.max(1, h));
-        c.fill(0, tearY, w, Math.min(h, tearY + 2), 0x18FFFFFF);
-        int noiseX = Math.floorMod(ticks * 37, Math.max(1, w));
-        c.fill(noiseX, 0, Math.min(w, noiseX + 2), h, 0x10FFFFFF);
-
-        if (mode == 1) {
-            int bw = Math.min(420, w - 20);
-            int bh = Math.min(250, h - 20);
-            int x = (w - bw) / 2;
-            int y = (h - bh) / 2;
-            c.fill(x, y, x + bw, y + bh, 0xEE050505);
-            c.drawCenteredTextWithShadow(MinecraftClient.getInstance().textRenderer, "VHS / TV MODE", w / 2, y + 10, 0xFFB8B8B8);
-            c.drawCenteredTextWithShadow(MinecraftClient.getInstance().textRenderer, "REC", w / 2, y + bh - 20, 0xFF8C2020);
-            if (tvPos != null) {
-                c.drawCenteredTextWithShadow(MinecraftClient.getInstance().textRenderer,
-                        tvPos.getX() + ", " + tvPos.getY() + ", " + tvPos.getZ(), w / 2, y + bh - 34, 0xFF6F6F6F);
+    public static final class Session {
+        private final CutsceneDefinition scene;
+        private final int total;
+        private int ticks;
+        private Session(CutsceneDefinition scene) {
+            this.scene = scene;
+            int t=0;for(var k:scene.keyframes)t+=Math.max(1,k.durationTicks);this.total=Math.max(1,t);
+        }
+        private boolean tick(){ticks++;return ticks<STATIC_TICKS+total+40;}
+        public boolean staticPhase(){return ticks<STATIC_TICKS;}
+        public float progress(){return Math.max(0,Math.min(1,(ticks-STATIC_TICKS)/(float)total));}
+        public String id(){return scene.id==null?"recording":scene.id;}
+        public String subtitle(){
+            if(scene.keyframes.isEmpty()||ticks<STATIC_TICKS)return "";
+            int local=ticks-STATIC_TICKS,acc=0;
+            for(var k:scene.keyframes){acc+=Math.max(1,k.durationTicks);if(local<acc)return k.subtitle==null?"":k.subtitle;}
+            return "";
+        }
+        public Sample sample(){
+            if(scene.keyframes.isEmpty())return new Sample(0,0,0,0,0,70);
+            int local=Math.max(0,ticks-STATIC_TICKS),acc=0;
+            for(int i=0;i<scene.keyframes.size();i++){
+                var a=scene.keyframes.get(i);int dur=Math.max(1,a.durationTicks);
+                if(local<acc+dur){var b=i+1<scene.keyframes.size()?scene.keyframes.get(i+1):a;float q=Math.max(0,Math.min(1,(local-acc)/(float)dur));return new Sample(lerp(a.x,b.x,q),lerp(a.y,b.y,q),lerp(a.z,b.z,q),lerpAngle(a.yaw,b.yaw,q),lerp(a.pitch,b.pitch,q),lerp(a.fov,b.fov,q));}
+                acc+=dur;
             }
+            var k=scene.keyframes.get(scene.keyframes.size()-1);return new Sample(k.x,k.y,k.z,k.yaw,k.pitch,k.fov);
         }
+        private static double lerp(double a,double b,float q){return a+(b-a)*q;}
+        private static float lerpAngle(float a,float b,float q){float d=(b-a)%360f;if(d>180)d-=360;if(d<-180)d+=360;return a+d*q;}
     }
+
+    public record Sample(double x,double y,double z,float yaw,float pitch,double fov){}
 }
