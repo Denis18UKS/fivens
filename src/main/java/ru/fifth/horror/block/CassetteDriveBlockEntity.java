@@ -110,8 +110,16 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
     private void startPlayback(ServerWorld sw, String rec) {
         if (tvPos == null || !(sw.getBlockEntity(tvPos) instanceof TelevisionBlockEntity tv)) return;
         String json = CutsceneManager.json(sw.getServer(), rec);
+        if (json.isBlank()) {
+            reject = true;
+            phase = 2;
+            timer = FAIL_TICKS;
+            sync();
+            return;
+        }
+
         tv.start(rec);
-        Box box = new Box(tvPos).expand(48);
+        Box box = new Box(tvPos).expand(64);
         for (ServerPlayerEntity p : sw.getEntitiesByClass(ServerPlayerEntity.class, box, x -> true)) {
             PacketByteBuf buf = PacketByteBufs.create();
             buf.writeString(json, 1_000_000);
@@ -121,9 +129,14 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
         }
         sw.playSound(null, pos, SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(), SoundCategory.BLOCKS, .7f, .7f);
         markDirty();
+        sync();
     }
 
-    private void sync() { if (world != null) world.updateListeners(pos, getCachedState(), getCachedState(), 3); }
+    private void sync() {
+        if (world == null) return;
+        if (world instanceof ServerWorld sw) sw.getChunkManager().markForUpdate(pos);
+        world.updateListeners(pos, getCachedState(), getCachedState(), 3);
+    }
 
     @Override public NbtCompound toInitialChunkDataNbt() { return createNbt(); }
     @Override public net.minecraft.network.packet.Packet<net.minecraft.network.listener.ClientPlayPacketListener> toUpdatePacket() { return net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket.create(this); }
