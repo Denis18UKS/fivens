@@ -8,6 +8,7 @@ import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
+import ru.fifth.horror.block.LiftBlockEntity;
 import ru.fifth.horror.network.FifthNetworking;
 
 /** Responsive editor for a physical lift block. */
@@ -18,6 +19,7 @@ public final class LiftEditorScreen extends HorrorScreen {
     private int floor;
     private int openMask;
     private BlockPos stage;
+    private boolean relocateStage;
     private TextFieldWidget idField, xField, yField, zField;
     private String status = "";
 
@@ -27,7 +29,8 @@ public final class LiftEditorScreen extends HorrorScreen {
         this.liftPos = liftPos;
         this.floor = Math.max(1, Math.min(9, floor));
         this.openMask = openMask;
-        this.stage = stage;
+        this.relocateStage = stage != null && !LiftBlockEntity.NO_STAGE_ORIGIN.equals(stage);
+        this.stage = relocateStage ? stage : liftPos;
         this.initialLiftId = liftId == null || liftId.isBlank() ? "lift" : liftId;
     }
 
@@ -35,7 +38,7 @@ public final class LiftEditorScreen extends HorrorScreen {
     protected void init() {
         beginHorrorInit();
         int w = contentWidth(540), x = (width - w) / 2, y = safeTop(), gap = 6, bh = 20;
-        boolean compact = height < 330 || w < 380;
+        boolean compact = height < 360 || w < 380;
         int idW = Math.max(120, (int)(w * .66));
         idField = horrorField(x, y, idW, bh, initialLiftId, 64);
         addDrawableChild(HorrorButton.builder(Text.literal("Этаж: " + floor), b -> {
@@ -48,7 +51,16 @@ public final class LiftEditorScreen extends HorrorScreen {
         yField = horrorField(x + fw + gap, y + 28, fw, bh, Integer.toString(stage.getY()), 12);
         zField = horrorField(x + (fw + gap) * 2, y + 28, fw, bh, Integer.toString(stage.getZ()), 12);
 
-        int gridTop = y + 58;
+        addDrawableChild(HorrorButton.builder(stageModeText(), b -> {
+            relocateStage = !relocateStage;
+            b.setMessage(stageModeText());
+            setStageFieldsActive(relocateStage);
+            status = relocateStage
+                    ? "Этажи будут переноситься в указанную общую область."
+                    : "Безопасный режим: каждый этаж восстанавливается там, где был сохранён.";
+        }).dimensions(x, y + 55, w, bh).build());
+
+        int gridTop = y + 83;
         int bw = (w - gap * 2) / 3;
         int rowStep = compact ? 22 : 25;
         for (int i = 1; i <= 9; i++) {
@@ -61,13 +73,16 @@ public final class LiftEditorScreen extends HorrorScreen {
         }
 
         int yy = gridTop + rowStep * 3 + 4;
-        addDrawableChild(HorrorButton.builder(Text.literal("Точка слоёв = позиция игрока"), b -> {
+        addDrawableChild(HorrorButton.builder(Text.literal("Общая область: min-угол = позиция игрока"), b -> {
             if (client != null && client.player != null) {
                 BlockPos p = client.player.getBlockPos();
                 xField.setText(Integer.toString(p.getX()));
                 yField.setText(Integer.toString(p.getY()));
                 zField.setText(Integer.toString(p.getZ()));
-                status = "Точка восстановления обновлена";
+                relocateStage = true;
+                setStageFieldsActive(true);
+                status = "Общий min-угол восстановления: " + p.toShortString();
+                init(client, width, height);
             }
         }).dimensions(x, yy, w, bh).build());
         yy += 26;
@@ -81,6 +96,19 @@ public final class LiftEditorScreen extends HorrorScreen {
 
         addDrawableChild(HorrorButton.builder(Text.literal("Сохранить"), b -> save()).dimensions(x, yy, half, bh).build());
         addDrawableChild(HorrorButton.builder(Text.literal("Назад"), b -> client.setScreen(parent)).dimensions(x + half + gap, yy, w - half - gap, bh).build());
+        setStageFieldsActive(relocateStage);
+    }
+
+    private void setStageFieldsActive(boolean active) {
+        if (xField != null) xField.active = active;
+        if (yField != null) yField.active = active;
+        if (zField != null) zField.active = active;
+    }
+
+    private Text stageModeText() {
+        return Text.literal(relocateStage
+                ? "Область этажей: ОБЩАЯ ТОЧКА (перенос включён)"
+                : "Область этажей: ИСХОДНОЕ МЕСТО СЛОЯ (безопасно)");
     }
 
     private Text doorText(int f) {
@@ -97,7 +125,9 @@ public final class LiftEditorScreen extends HorrorScreen {
 
     private void save() {
         try {
-            stage = new BlockPos(Integer.parseInt(xField.getText()), Integer.parseInt(yField.getText()), Integer.parseInt(zField.getText()));
+            if (relocateStage) {
+                stage = new BlockPos(Integer.parseInt(xField.getText()), Integer.parseInt(yField.getText()), Integer.parseInt(zField.getText()));
+            }
             String liftId = idField.getText().trim();
             if (liftId.isBlank()) { status = "ID лифта не может быть пустым"; return; }
             PacketByteBuf out = PacketByteBufs.create();
@@ -105,9 +135,11 @@ public final class LiftEditorScreen extends HorrorScreen {
             out.writeString(liftId, 64);
             out.writeVarInt(floor);
             out.writeVarInt(openMask);
-            out.writeBlockPos(stage);
+            out.writeBlockPos(relocateStage ? stage : LiftBlockEntity.NO_STAGE_ORIGIN);
             ClientPlayNetworking.send(FifthNetworking.SAVE_LIFT_CONFIG, out);
-            status = "Сохранено. ID слоёв: " + liftId;
+            status = relocateStage
+                    ? "Сохранено. Все этажи будут вставляться от min-угла " + stage.toShortString()
+                    : "Сохранено. Этажи будут восстанавливаться в исходных координатах своих слоёв.";
         } catch (NumberFormatException e) {
             status = "Координаты должны быть целыми числами";
         }
@@ -120,9 +152,9 @@ public final class LiftEditorScreen extends HorrorScreen {
         c.drawTextWithShadow(textRenderer, "ID лифта / набора этажей", x, safeTop() - 10, 0xFFB69F97);
         if (height >= 220) {
             int fw = (w - 12) / 3;
-            c.drawTextWithShadow(textRenderer, "X сцены", x, safeTop() + 19, 0xFFB69F97);
-            c.drawTextWithShadow(textRenderer, "Y сцены", x + fw + 6, safeTop() + 19, 0xFFB69F97);
-            c.drawTextWithShadow(textRenderer, "Z сцены", x + (fw + 6) * 2, safeTop() + 19, 0xFFB69F97);
+            c.drawTextWithShadow(textRenderer, "X min-угла", x, safeTop() + 19, 0xFFB69F97);
+            c.drawTextWithShadow(textRenderer, "Y min-угла", x + fw + 6, safeTop() + 19, 0xFFB69F97);
+            c.drawTextWithShadow(textRenderer, "Z min-угла", x + (fw + 6) * 2, safeTop() + 19, 0xFFB69F97);
         }
         if (!status.isBlank()) c.drawCenteredTextWithShadow(textRenderer, status, width / 2, height - safeBottom() - 11, 0xFFD99090);
         super.render(c, mx, my, delta);
