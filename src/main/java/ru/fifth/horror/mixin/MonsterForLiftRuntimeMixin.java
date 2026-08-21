@@ -14,14 +14,19 @@ import ru.fifth.horror.entity.MonsterForLiftEntity;
 
 /**
  * Runtime locomotion bridge:
- * - manual walking/run animation previews now move the MFL physically using Minecraft navigation;
- * - explicit chase-test mode drives the nearest MFL toward a selected player while preserving the authored AI state.
+ * - manual walking/run animation previews move the MFL physically using Minecraft navigation;
+ * - explicit chase-test mode drives the nearest MFL toward a selected player while preserving authored AI state.
+ *
+ * IMPORTANT: tick() is an overridden Minecraft method and is remapped by Loom in the production jar.
+ * Therefore this mixin MUST use the normal refmap remapping for the tick injection. Using remap=false here
+ * compiles in dev but crashes a real Fabric client because runtime MonsterForLiftEntity contains method_5773,
+ * not the named development method "tick".
  */
-@Mixin(value = MonsterForLiftEntity.class, remap = false)
+@Mixin(MonsterForLiftEntity.class)
 public abstract class MonsterForLiftRuntimeMixin {
     @Unique private Vec3d fiven$manualLocomotionTarget;
 
-    @Inject(method = "tick", at = @At("TAIL"), remap = false)
+    @Inject(method = "tick", at = @At("TAIL"))
     private void fiven$runtimeLocomotion(CallbackInfo ci) {
         MonsterForLiftEntity mfl = (MonsterForLiftEntity) (Object) this;
         if (mfl.getWorld().isClient || !(mfl.getWorld() instanceof ServerWorld world)) return;
