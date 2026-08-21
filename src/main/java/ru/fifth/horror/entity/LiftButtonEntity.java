@@ -4,6 +4,8 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.nbt.NbtCompound;
+import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.Hand;
 import net.minecraft.util.math.Box;
@@ -18,7 +20,7 @@ import software.bernie.geckolib.util.GeckoLibUtil;
 
 import java.util.Comparator;
 
-/** Animated lift button/panel. Clicking it also opens the nearest Fiven lift. */
+/** Animated lift call button. */
 public final class LiftButtonEntity extends Entity implements GeoEntity {
     private static final RawAnimation CLICK = RawAnimation.begin().thenPlay("click_on_btn");
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
@@ -32,10 +34,14 @@ public final class LiftButtonEntity extends Entity implements GeoEntity {
     public ActionResult interact(PlayerEntity player, Hand hand) {
         if (!getWorld().isClient) {
             triggerAnim("main", "click");
+            getWorld().playSound(null, getBlockPos(), SoundEvents.BLOCK_STONE_BUTTON_CLICK_ON,
+                    SoundCategory.BLOCKS, 0.65f, 0.9f);
             Box area = getBoundingBox().expand(12.0);
-            getWorld().getEntitiesByClass(LiftEntity.class, area, e -> e.isAlive()).stream()
+            getWorld().getEntitiesByClass(LiftEntity.class, area, entity -> entity.isAlive()).stream()
                     .min(Comparator.comparingDouble(this::squaredDistanceTo))
-                    .ifPresent(LiftEntity::playDoors);
+                    .ifPresent(lift -> {
+                        if (lift.canOpenOnFloor(lift.getCurrentFloor())) lift.playDoors();
+                    });
         }
         return ActionResult.success(getWorld().isClient);
     }
@@ -51,5 +57,8 @@ public final class LiftButtonEntity extends Entity implements GeoEntity {
                 .triggerableAnim("click", CLICK));
     }
 
-    @Override public AnimatableInstanceCache getAnimatableInstanceCache() { return cache; }
+    @Override
+    public AnimatableInstanceCache getAnimatableInstanceCache() {
+        return cache;
+    }
 }
