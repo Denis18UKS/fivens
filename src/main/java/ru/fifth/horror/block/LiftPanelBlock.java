@@ -28,10 +28,16 @@ import org.jetbrains.annotations.Nullable;
 import ru.fifth.horror.FifthMod;
 import ru.fifth.horror.network.FifthNetworking;
 
-/** A real wall-mounted 9-floor panel block. */
+/** A real wall-mounted 9-floor panel block. FACING always points away from the supporting wall. */
 public final class LiftPanelBlock extends BlockWithEntity {
     public static final DirectionProperty FACING = Properties.HORIZONTAL_FACING;
-    private static final VoxelShape NORTH = Block.createCuboidShape(2, 1, 0, 14, 15, 1.5);
+
+    /*
+     * Base orientation: the panel faces NORTH, therefore its back must sit against the SOUTH
+     * side of the placement cell (Z 14.5..16). The old shape lived at Z 0..1.5, which made
+     * the model appear on the opposite side of the target wall.
+     */
+    private static final VoxelShape NORTH = Block.createCuboidShape(2, 1, 14.5, 14, 15, 16);
 
     public LiftPanelBlock(Settings settings) {
         super(settings.nonOpaque());
@@ -41,8 +47,10 @@ public final class LiftPanelBlock extends BlockWithEntity {
     @Nullable
     @Override
     public BlockState getPlacementState(ItemPlacementContext ctx) {
-        Direction side = ctx.getSide();
-        Direction facing = side.getAxis().isHorizontal() ? side : ctx.getHorizontalPlayerFacing().getOpposite();
+        Direction clickedFace = ctx.getSide();
+        Direction facing = clickedFace.getAxis().isHorizontal()
+                ? clickedFace
+                : ctx.getHorizontalPlayerFacing().getOpposite();
         return getDefaultState().with(FACING, facing);
     }
 

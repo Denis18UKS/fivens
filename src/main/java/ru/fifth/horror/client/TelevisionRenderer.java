@@ -1,5 +1,6 @@
 package ru.fifth.horror.client;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.render.OverlayTexture;
 import net.minecraft.client.render.RenderLayer;
@@ -19,101 +20,108 @@ import ru.fifth.horror.block.TelevisionBlockEntity;
 
 import java.util.Random;
 
-/** Draws VHS content only on the physical black screen area of the television model. */
+/** Physical CRT overlay renderer used by the normal BER and the dispatcher mixin. */
 public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionBlockEntity> {
-    private final TextRenderer text;
+    private static final float SCREEN_HALF = 7.0f / 16.0f;
+    private static final int SCREEN_LIGHT = 0x00F000F0;
 
-    public TelevisionRenderer(BlockEntityRendererFactory.Context ctx) { text = ctx.getTextRenderer(); }
+    public TelevisionRenderer(BlockEntityRendererFactory.Context ignored) {}
 
     @Override
     public void render(TelevisionBlockEntity be, float delta, MatrixStack ms, VertexConsumerProvider vertices, int light, int overlay) {
-        if (be.getRecording().isBlank() && be.getStaticTicks() <= 0) return;
-        // The off-screen VHS world pass renders the base TV block but not the TV's own video surface.
-        if (VhsWorldCapture.isCapturing()) return;
+        renderScreen(be, delta, ms, vertices);
+    }
 
+    public static void renderScreen(TelevisionBlockEntity be, float delta, MatrixStack ms, VertexConsumerProvider vertices) {
+        if (be == null || VhsWorldCapture.isCapturing()) return;
+        VhsPlayback.Session session = VhsPlayback.session(be.getPos());
+        if (be.getRecording().isBlank() && be.getStaticTicks() <= 0 && session == null) return;
+
+        TextRenderer text = MinecraftClient.getInstance().textRenderer;
         Direction facing = be.getCachedState().contains(TelevisionBlock.FACING)
                 ? be.getCachedState().get(TelevisionBlock.FACING) : Direction.NORTH;
-        float yaw = switch (facing) { case SOUTH -> 180f; case EAST -> -90f; case WEST -> 90f; default -> 0f; };
 
         ms.push();
-        ms.translate(.5, .73, .5);
-        ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(yaw));
-        // Local north face. Tiny offset prevents z-fighting with the black screen polygon.
-        ms.translate(0, 0, -.506);
+        orientToPhysicalFront(ms, facing);
 
-        VhsPlayback.Session session = VhsPlayback.session(be.getPos());
-        boolean noise = be.getStaticTicks() > 0 || (session != null && session.staticPhase());
+        boolean startupStatic = session != null ? session.staticPhase() : be.getStaticTicks() > 0;
         Identifier captured = session == null ? null : VhsWorldCapture.texture(be.getPos());
+        if (!startupStatic && captured != null) drawVideoQuad(ms, vertices, captured, SCREEN_LIGHT);
 
-        if (!noise && captured != null) {
-            drawVideoQuad(ms, vertices, captured, light);
-        }
-
-        // Text/VHS overlays are intentionally rendered in the same old low-resolution screen space.
-        ms.scale(.0062f, -.0062f, .0062f);
+        float overlayScale = (SCREEN_HALF * 2.0f) / 108.0f;
+        ms.scale(overlayScale, -overlayScale, overlayScale);
         Matrix4f matrix = ms.peek().getPositionMatrix();
-        int x = -54, y = -36;
+        int x = -54;
+        int y = -43;
 
-        if (noise) {
-            drawBlack(matrix, vertices, light, x, y);
+        if (startupStatic) {
+            drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
             long seed = (be.getWorld() == null ? 0 : be.getWorld().getTime()) * 31L + be.getPos().asLong();
             Random r = new Random(seed);
             String chars = " ░▒▓";
-            for (int row = 0; row < 10; row++) {
+            for (int row = 0; row < 12; row++) {
                 StringBuilder line = new StringBuilder();
                 for (int col = 0; col < 18; col++) line.append(chars.charAt(r.nextInt(chars.length())));
-                int g = 70 + r.nextInt(120);
+                int g = 80 + r.nextInt(145);
                 int grey = 0xFF000000 | (g << 16) | (g << 8) | g;
-                text.draw(line.toString(), x, y + 3 + row * 6, grey, false, matrix, vertices,
-                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+                text.draw(line.toString(), x, y + 4 + row * 7, grey, false, matrix, vertices,
+                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             }
-            text.draw("NO SIGNAL", -27, y + 29, 0xFFBFBFBF, false, matrix, vertices,
-                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+            text.draw("VHS TRACKING...", -39, -4, 0xFFF0F0F0, false, matrix, vertices,
+                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
         } else if (session != null) {
             if (captured == null) {
-                // GPU/driver-safe fallback: timeline visualization instead of crashing the client.
-                drawBlack(matrix, vertices, light, x, y);
-                VhsPlayback.Sample s = session.sample();
-                float p = session.progress();
-                for (int row = 0; row < 9; row++) {
-                    StringBuilder line = new StringBuilder();
-                    for (int col = 0; col < 18; col++) {
-                        double wave = Math.sin((col * .72) + (row * .41) + (p * 22) + (s.yaw() * .025) + s.x() * .03 + s.z() * .02);
-                        line.append(wave > .55 ? '▓' : wave > 0 ? '▒' : wave > -.55 ? '░' : ' ');
-                    }
-                    int g = Math.max(55, Math.min(205, (int) (120 + Math.sin(row + p * 17) * 55)));
-                    int color = 0xFF000000 | (g << 16) | (g << 8) | g;
-                    text.draw(line.toString(), x, y + 3 + row * 6, color, false, matrix, vertices,
-                            TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
-                }
+                // Never fake the recording with more static. Static belongs only to cassette startup.
+                // This text normally appears for at most the first capture frame; persistent appearance means the
+                // secondary-camera renderer logged a real error to latest.log under [Fiven/VHS].
+                drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
+                text.draw("VIDEO BUFFERING", -39, -4, 0xFFE6E6E6, false, matrix, vertices,
+                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             } else {
-                // Thin scanlines over the captured camera image.
-                for (int row = 0; row < 10; row += 2) {
-                    text.draw("──────────────────", x, y + 3 + row * 6, 0x2D000000, false, matrix, vertices,
-                            TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+                for (int row = 0; row < 12; row += 2) {
+                    text.draw("──────────────────", x, y + 4 + row * 7, 0x55000000, false, matrix, vertices,
+                            TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
                 }
             }
 
-            text.draw("REC", x + 2, y + 2, 0xFFE6E6E6, false, matrix, vertices,
-                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+            text.draw("REC", x + 2, y + 2, 0xFFF2F2F2, false, matrix, vertices,
+                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             String sub = session.subtitle();
             if (!sub.isBlank()) {
                 String clipped = sub.length() > 25 ? sub.substring(0, 25) : sub;
-                text.draw(Text.literal(clipped), x + 2, y + 60, 0xFFE0E0E0, false, matrix, vertices,
-                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+                text.draw(Text.literal(clipped), x + 2, y + 76, 0xFFF0F0F0, false, matrix, vertices,
+                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             }
         } else {
-            drawBlack(matrix, vertices, light, x, y);
-            text.draw("REC  " + be.getRecording(), x + 3, y + 30, 0xFFBFBFBF, false, matrix, vertices,
-                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
+            drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
+            text.draw("WAITING FOR VHS", x + 4, -4, 0xFFE0E0E0, false, matrix, vertices,
+                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
         }
         ms.pop();
     }
 
-    private void drawBlack(Matrix4f matrix, VertexConsumerProvider vertices, int light, int x, int y) {
+    private static void orientToPhysicalFront(MatrixStack ms, Direction facing) {
+        switch (facing) {
+            case SOUTH -> {
+                ms.translate(.5, .5, 1.0015);
+                ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(180f));
+            }
+            case EAST -> {
+                ms.translate(1.0015, .5, .5);
+                ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-90f));
+            }
+            case WEST -> {
+                ms.translate(-.0015, .5, .5);
+                ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(90f));
+            }
+            default -> ms.translate(.5, .5, -.0015);
+        }
+    }
+
+    private static void drawBlack(TextRenderer text, Matrix4f matrix, VertexConsumerProvider vertices, int light, int x, int y) {
         String black = "██████████████████";
-        for (int row = 0; row < 12; row++) {
-            text.draw(black, x, y + row * 6, 0xFF000000, false, matrix, vertices,
+        for (int row = 0; row < 13; row++) {
+            text.draw(black, x, y + row * 7, 0xFF000000, false, matrix, vertices,
                     TextRenderer.TextLayerType.POLYGON_OFFSET, 0, light);
         }
     }
@@ -122,20 +130,24 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         VertexConsumer vc = vertices.getBuffer(RenderLayer.getEntityTranslucent(texture));
         Matrix4f m = ms.peek().getPositionMatrix();
         Matrix3f n = ms.peek().getNormalMatrix();
-        float left = -.335f, right = .335f, top = .225f, bottom = -.225f;
-        vertex(vc, m, n, left, top, 0, 0, light);
-        vertex(vc, m, n, right, top, 1, 0, light);
-        vertex(vc, m, n, right, bottom, 1, 1, light);
-        vertex(vc, m, n, left, bottom, 0, 1, light);
+        float left = -SCREEN_HALF, right = SCREEN_HALF, top = SCREEN_HALF, bottom = -SCREEN_HALF;
+        vertex(vc, m, n, left, top, 0, 0, light, -1);
+        vertex(vc, m, n, right, top, 1, 0, light, -1);
+        vertex(vc, m, n, right, bottom, 1, 1, light, -1);
+        vertex(vc, m, n, left, bottom, 0, 1, light, -1);
+        vertex(vc, m, n, left, bottom, 0, 1, light, 1);
+        vertex(vc, m, n, right, bottom, 1, 1, light, 1);
+        vertex(vc, m, n, right, top, 1, 0, light, 1);
+        vertex(vc, m, n, left, top, 0, 0, light, 1);
     }
 
-    private static void vertex(VertexConsumer vc, Matrix4f m, Matrix3f n, float x, float y, float u, float v, int light) {
+    private static void vertex(VertexConsumer vc, Matrix4f m, Matrix3f n, float x, float y, float u, float v, int light, float nz) {
         vc.vertex(m, x, y, 0)
                 .color(255, 255, 255, 255)
                 .texture(u, v)
                 .overlay(OverlayTexture.DEFAULT_UV)
                 .light(light)
-                .normal(n, 0, 0, -1)
+                .normal(n, 0, 0, nz)
                 .next();
     }
 }

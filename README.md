@@ -12,6 +12,8 @@ Fabric 1.20.1 toolkit for building cinematic multiplayer horror maps directly in
 - Physical lift Block + BlockEntity with independent `liftId:floor` sets, wall floor panels, vanilla stone-button calls, per-floor door permissions, red floor travel overlay and persistent NORMAL/CURSED mode.
 - Cursed-lift arrival events can bind a saved cutscene, FifthScript scenario and/or named trigger to a particular floor; manual paranormal test events are also available.
 - MFL with explicit `OFF / LOGICAL / SCRIPTED` AI, no random wandering, player-only hunt/search/chase, vision settings, routes, screamers and authored hiding volumes for cupboards/closets.
+- Manual MFL `walking` / `run` previews now drive real Minecraft navigation instead of playing the animation while standing still.
+- Director-only MFL runtime tests provide an explicit screamer command and a reversible chase-test mode that can target Creative players without changing the saved authored AI state.
 - Structure snapshot variants/layers with default-active and restore-on-load behavior.
 - World-space entity horror effects with protected entries that can survive bulk clearing.
 - Decorative `clock_arms` wall block and the complete director-tool creative tab.
@@ -61,6 +63,26 @@ Useful commands:
 /fiven hiding-zones status
 /fiven hiding-zones clear
 ```
+
+## MFL runtime tests
+All commands use the nearest living MFL within 64 blocks of the command player.
+
+```text
+/fiven mfl screamer
+/fiven mfl chase-test start
+/fiven mfl chase-test start <player>
+/fiven mfl chase-test status
+/fiven mfl chase-test stop
+```
+
+`/fiven mfl screamer` plays the actual `mfl_screamer` animation on the MFL and shows the screamer to the command player even when the director is in Creative.
+
+`chase-test start` temporarily pauses the MFL's authored AI state and drives a real navigation chase toward the selected player. It supports Creative targets for testing, uses the normal run/walk speeds, respects MFL hiding zones, remembers the last visible player position and switches from `run` to search/walking after line of sight is lost. `stop` restores the previous AI mode, hunt and patrol flags.
+
+Manual animation preview behavior:
+- `walking` / `walk` = MFL physically walks forward using path navigation;
+- `run` / `running` = MFL physically runs forward using path navigation;
+- idle/look/hand/screamer animations do not create locomotion on their own.
 
 ## Director utility commands
 ```text

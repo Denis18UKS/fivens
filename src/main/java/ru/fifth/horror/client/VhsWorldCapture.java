@@ -3,8 +3,10 @@ package ru.fifth.horror.client;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.systems.VertexSorter;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gl.Framebuffer;
 import net.minecraft.client.gl.SimpleFramebuffer;
 import net.minecraft.client.render.Camera;
+import net.minecraft.client.render.Frustum;
 import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
 import net.minecraft.client.util.math.MatrixStack;
@@ -12,22 +14,21 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.RotationAxis;
 import org.joml.Matrix4f;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import ru.fifth.horror.block.TelevisionBlockEntity;
 import ru.fifth.horror.mixin.CameraAccessor;
+import ru.fifth.horror.mixin.MinecraftClientFramebufferAccessor;
+import ru.fifth.horror.mixin.WorldRendererVhsAccessor;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-/**
- * Real off-screen world renderer for VHS playback.
- *
- * A recorded cutscene keyframe becomes an independent Camera, WorldRenderer draws that view into a low-resolution
- * framebuffer, the framebuffer is copied into a dynamic texture, and TelevisionRenderer maps only that texture onto
- * the physical TV screen. Player camera/HUD/input are never replaced by VHS playback.
- */
+/** Real secondary-camera renderer for recorded VHS frames shown only on physical TV screens. */
 public final class VhsWorldCapture {
+    private static final Logger LOGGER = LoggerFactory.getLogger("Fiven/VHS");
     private static final int WIDTH = 256;
     private static final int HEIGHT = 144;
     private static final Map<Long, Capture> CAPTURES = new HashMap<>();
@@ -45,7 +46,7 @@ public final class VhsWorldCapture {
         return capture == null ? null : capture.id;
     }
 
-    /** Called from the HUD render callback after the normal world render. At most one TV frame is captured per call. */
+    /** Called after the player's normal world pass. At most one physical TV frame is captured per call. */
     public static void captureNext(float tickDelta) {
         if (capturing) return;
         MinecraftClient client = MinecraftClient.getInstance();
@@ -62,8 +63,6 @@ public final class VhsWorldCapture {
             Capture capture = CAPTURES.computeIfAbsent(key, ignored -> new Capture());
             if (capture.lastSessionTick == session.ticks()) continue;
 
-            // If a particular GPU/driver rejects recursive WorldRenderer capture, keep the safe fallback and
-            // retry only once per second instead of hammering the render loop every frame.
             if (capture.failures >= 5 && session.ticks() % 20 != 0) {
                 capture.lastSessionTick = session.ticks();
                 continue;
@@ -79,11 +78,14 @@ public final class VhsWorldCapture {
         ensureFramebuffer();
         if (scratch == null) return;
 
+        MinecraftClientFramebufferAccessor framebufferAccess = (MinecraftClientFramebufferAccessor) (Object) client;
+        Framebuffer originalFramebuffer = framebufferAccess.fiven$getFramebuffer();
         Matrix4f oldProjection = new Matrix4f(RenderSystem.getProjectionMatrix());
         VertexSorter oldSorter = RenderSystem.getVertexSorting();
         MatrixStack modelView = RenderSystem.getModelViewStack();
         boolean pushedModelView = false;
         boolean lightmap = false;
+        boolean framebufferSwapped = false;
         capturing = true;
 
         try {
@@ -99,6 +101,20 @@ public final class VhsWorldCapture {
             matrices.multiply(RotationAxis.POSITIVE_X.rotationDegrees(camera.getPitch()));
             matrices.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(camera.getYaw() + 180.0f));
 
+            /*
+             * WorldRenderer normally prepares its frustum/terrain from the player's camera before render().
+             * A secondary VHS camera must do this again; otherwise it reuses player-camera visibility and the
+             * framebuffer can contain only empty/fallback imagery even though the recorded keyframes are valid.
+             */
+            client.worldRenderer.setupFrustum(matrices, camera.getPos(), projection);
+            WorldRendererVhsAccessor worldAccess = (WorldRendererVhsAccessor) (Object) client.worldRenderer;
+            Frustum vhsFrustum = worldAccess.fiven$getFrustum();
+            if (vhsFrustum != null) {
+                worldAccess.fiven$setupTerrain(camera, vhsFrustum, false, client.player.isSpectator());
+            }
+
+            framebufferAccess.fiven$setFramebuffer(scratch);
+            framebufferSwapped = true;
             scratch.setClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             scratch.beginWrite(true);
             scratch.clear(false);
@@ -127,19 +143,18 @@ public final class VhsWorldCapture {
             scratch.endWrite();
 
             NativeImage image = readFramebuffer();
-            if (image == null) {
-                capture.lastSessionTick = session.ticks();
-                capture.failures++;
-                return;
-            }
+            if (image == null) throw new IllegalStateException("Could not read VHS framebuffer");
             applyVhs(image, client, key, session.ticks());
             installTexture(client, key, capture, image);
             capture.lastSessionTick = session.ticks();
             capture.failures = 0;
         } catch (Throwable error) {
-            // TV playback has a renderer fallback; a bad GPU/driver path must never take down the game client.
             capture.lastSessionTick = session.ticks();
             capture.failures++;
+            if (capture.failures <= 3) {
+                LOGGER.warn("VHS secondary-camera capture failed for TV {} (attempt {}). TV will keep an in-screen fallback.",
+                        BlockPos.fromLong(key), capture.failures, error);
+            }
         } finally {
             if (lightmap) {
                 try { client.gameRenderer.getLightmapTextureManager().disable(); } catch (Throwable ignored) {}
@@ -148,7 +163,10 @@ public final class VhsWorldCapture {
                 try { modelView.pop(); RenderSystem.applyModelViewMatrix(); } catch (Throwable ignored) {}
             }
             try { RenderSystem.setProjectionMatrix(oldProjection, oldSorter); } catch (Throwable ignored) {}
-            try { client.getFramebuffer().beginWrite(true); } catch (Throwable ignored) {}
+            if (framebufferSwapped) {
+                try { framebufferAccess.fiven$setFramebuffer(originalFramebuffer); } catch (Throwable ignored) {}
+            }
+            try { originalFramebuffer.beginWrite(true); } catch (Throwable ignored) {}
             capturing = false;
         }
     }
@@ -156,7 +174,7 @@ public final class VhsWorldCapture {
     private static void ensureFramebuffer() {
         if (scratch == null) {
             scratch = new SimpleFramebuffer(WIDTH, HEIGHT, true, false);
-            scratch.setTexFilter(9729); // GL_LINEAR: the TV surface gets a deliberately soft VHS upscale.
+            scratch.setTexFilter(9729);
             return;
         }
         if (scratch.textureWidth != WIDTH || scratch.textureHeight != HEIGHT) scratch.resize(WIDTH, HEIGHT, false);
@@ -205,7 +223,6 @@ public final class VhsWorldCapture {
                 int b = (abgr >>> 16) & 255;
                 int g = (abgr >>> 8) & 255;
                 int r = abgr & 255;
-
                 if (mono) {
                     int grey = (r * 30 + g * 59 + b * 11) / 100;
                     r = g = b = grey;

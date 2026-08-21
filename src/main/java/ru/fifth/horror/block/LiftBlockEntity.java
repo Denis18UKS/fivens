@@ -25,6 +25,7 @@ import java.util.Locale;
 /** Persistent state and GeckoLib controller for the physical lift block. */
 public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity {
     public static final int DEFAULT_OPEN_FLOOR_MASK = 0x1FF & ~(1 << 1) & ~(1 << 4) & ~(1 << 7);
+    public static final BlockPos NO_STAGE_ORIGIN = new BlockPos(0, -2048, 0);
     private static final RawAnimation CLOSED = RawAnimation.begin().thenLoop("doors_closed");
     private static final RawAnimation OPEN = RawAnimation.begin().thenLoop("doors_open");
     private static final RawAnimation OPEN_TRANSITION = RawAnimation.begin().thenPlay("animation_doors_open");
@@ -35,6 +36,7 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
     private int currentFloor = 1;
     private int targetFloor = 1;
     private int openFloorMask = DEFAULT_OPEN_FLOOR_MASK;
+    /** null = restore at captured floor coordinates; non-null = explicitly configured common-stage minimum corner. */
     private BlockPos stageOrigin;
     private int autoCloseTicks;
     private boolean cursed;
@@ -89,8 +91,17 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
         openFloorMask = open ? openFloorMask | bit : openFloorMask & ~bit;
         dirtyAndSync();
     }
-    public BlockPos getStageOrigin() { return stageOrigin == null ? pos.add(-8, -1, -8) : stageOrigin; }
-    public void setStageOrigin(BlockPos origin) { stageOrigin = origin == null ? null : origin.toImmutable(); dirtyAndSync(); }
+
+    public boolean hasStageOrigin() { return stageOrigin != null; }
+    @Nullable public BlockPos getConfiguredStageOrigin() { return stageOrigin; }
+    public BlockPos getStageDisplayOrigin() { return stageOrigin == null ? pos : stageOrigin; }
+    public BlockPos getStageOrigin() { return stageOrigin == null ? NO_STAGE_ORIGIN : stageOrigin; }
+
+    public void setStageOrigin(@Nullable BlockPos origin) {
+        stageOrigin = origin == null || NO_STAGE_ORIGIN.equals(origin) ? null : origin.toImmutable();
+        dirtyAndSync();
+    }
+    public void clearStageOrigin() { setStageOrigin(null); }
     public boolean isCursed() { return cursed; }
     public void setCursed(boolean value) { cursed = value; dirtyAndSync(); }
 
@@ -98,7 +109,10 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
 
     private void dirtyAndSync() {
         markDirty();
-        if (world != null && !world.isClient) world.updateListeners(pos, getCachedState(), getCachedState(), Block.NOTIFY_LISTENERS);
+        if (world != null && !world.isClient) {
+            if (world instanceof ServerWorld sw) sw.getChunkManager().markForUpdate(pos);
+            world.updateListeners(pos, getCachedState(), getCachedState(), Block.NOTIFY_LISTENERS);
+        }
     }
 
     @Override
@@ -123,6 +137,10 @@ public final class LiftBlockEntity extends BlockEntity implements GeoBlockEntity
         autoCloseTicks = Math.max(0, nbt.getInt("FivenAutoClose"));
         cursed = nbt.getBoolean("FivenCursed");
         stageOrigin = nbt.contains("FivenStageOrigin") ? BlockPos.fromLong(nbt.getLong("FivenStageOrigin")) : null;
+        // Old builds auto-generated pos.add(-8,-1,-8) and the old editor could persist it even when the author never chose a target.
+        // Migrate that exact legacy implicit offset back to safe "restore at captured coordinates" mode.
+        BlockPos legacyImplicit = pos.add(-8, -1, -8);
+        if (NO_STAGE_ORIGIN.equals(stageOrigin) || legacyImplicit.equals(stageOrigin)) stageOrigin = null;
     }
 
     private void setLiftIdWithoutSync(String value) {
