@@ -1,0 +1,22 @@
+{
+  "parent": "minecraft:block/block",
+  "textures": {
+    "front": "minecraft:item/clock_00",
+    "edge": "minecraft:block/black_concrete",
+    "particle": "minecraft:block/black_concrete"
+  },
+  "elements": [
+    {
+      "from": [2, 2, 14.5],
+      "to": [14, 14, 16],
+      "faces": {
+        "north": { "uv": [0, 0, 16, 16], "texture": "#front" },
+        "south": { "uv": [0, 0, 16, 16], "texture": "#edge" },
+        "east": { "uv": [0, 0, 1.5, 12], "texture": "#edge" },
+        "west": { "uv": [0, 0, 1.5, 12], "texture": "#edge" },
+        "up": { "uv": [0, 0, 12, 1.5], "texture": "#edge" },
+        "down": { "uv": [0, 0, 12, 1.5], "texture": "#edge" }
+      }
+    }
+  ]
+}

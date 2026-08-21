@@ -8,6 +8,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
@@ -19,6 +20,7 @@ import ru.fifth.horror.cutscene.CutsceneDefinition;
 import ru.fifth.horror.cutscene.CutsceneManager;
 import ru.fifth.horror.effect.EntityEffectManager;
 import ru.fifth.horror.entity.DirectorNpcEntity;
+import ru.fifth.horror.entity.MonsterForLiftEntity;
 import ru.fifth.horror.lift.LiftManager;
 import ru.fifth.horror.script.FifthScriptEngine;
 import ru.fifth.horror.structure.StructureLayerManager;
@@ -30,13 +32,23 @@ import java.util.List;
 public final class FifthNetworking {
     private static final Gson GSON = new Gson();
 
-    public static final Identifier OPEN_COMPUTER=id("open_computer"),SAVE_COMPUTER=id("save_computer"),RUN_COMPUTER=id("run_computer"),CREATE_NPC_EGG=id("create_npc_egg"),SAVE_NPC=id("save_npc"),STRUCTURE_CAPTURE=id("structure_capture"),STRUCTURE_ACTIVATE=id("structure_activate"),SAVE_CUTSCENE=id("save_cutscene"),PLAY_CUTSCENE=id("play_cutscene"),CUTSCENE_PAYLOAD=id("cutscene_payload"),CUTSCENE_END_TELEPORT=id("cutscene_end_teleport"),REQUEST_NPC_LIBRARY=id("request_npc_library"),NPC_LIBRARY_PAYLOAD=id("npc_library_payload"),PREVIEW_NPC_ANIMATION=id("preview_npc_animation"),NPC_CONTROL=id("npc_control"),MFL_CONTROL=id("mfl_control"),REQUEST_CUTSCENE_LIBRARY=id("request_cutscene_library"),CUTSCENE_LIBRARY_PAYLOAD=id("cutscene_library_payload"),REQUEST_CUTSCENE_EDIT=id("request_cutscene_edit"),CUTSCENE_EDIT_PAYLOAD=id("cutscene_edit_payload"),CREATE_CASSETTE=id("create_cassette"),VHS_PLAYBACK=id("vhs_playback"),SAVE_ANIMATION_CONDITION=id("save_animation_condition"),OPEN_LIFT_PANEL=id("open_lift_panel"),LIFT_PANEL_CONTROL=id("lift_panel_control"),LIFT_TRAVEL_START=id("lift_travel_start"),LIFT_TRAVEL_END=id("lift_travel_end"),OPEN_LIFT_EDITOR=id("open_lift_editor"),SAVE_LIFT_CONFIG=id("save_lift_config"),LIFT_PANEL_TRANSFORM=id("lift_panel_transform"),ENTITY_EFFECT_SAVE=id("entity_effect_save"),ENTITY_EFFECT_SYNC=id("entity_effect_sync"),SAVE_TV_CONFIG=id("save_tv_config"),SCREAMER=id("screamer");
+    public static final Identifier OPEN_COMPUTER=id("open_computer"),SAVE_COMPUTER=id("save_computer"),RUN_COMPUTER=id("run_computer"),CREATE_NPC_EGG=id("create_npc_egg"),SAVE_NPC=id("save_npc"),STRUCTURE_CAPTURE=id("structure_capture"),STRUCTURE_ACTIVATE=id("structure_activate"),SAVE_CUTSCENE=id("save_cutscene"),PLAY_CUTSCENE=id("play_cutscene"),CUTSCENE_PAYLOAD=id("cutscene_payload"),CUTSCENE_END_TELEPORT=id("cutscene_end_teleport"),REQUEST_NPC_LIBRARY=id("request_npc_library"),NPC_LIBRARY_PAYLOAD=id("npc_library_payload"),PREVIEW_NPC_ANIMATION=id("preview_npc_animation"),NPC_CONTROL=id("npc_control"),MFL_CONTROL=id("mfl_control"),MFL_CONFIG=id("mfl_config"),REQUEST_CUTSCENE_LIBRARY=id("request_cutscene_library"),CUTSCENE_LIBRARY_PAYLOAD=id("cutscene_library_payload"),REQUEST_CUTSCENE_EDIT=id("request_cutscene_edit"),CUTSCENE_EDIT_PAYLOAD=id("cutscene_edit_payload"),CREATE_CASSETTE=id("create_cassette"),VHS_PLAYBACK=id("vhs_playback"),SAVE_ANIMATION_CONDITION=id("save_animation_condition"),OPEN_LIFT_PANEL=id("open_lift_panel"),LIFT_PANEL_CONTROL=id("lift_panel_control"),LIFT_TRAVEL_START=id("lift_travel_start"),LIFT_TRAVEL_END=id("lift_travel_end"),OPEN_LIFT_EDITOR=id("open_lift_editor"),SAVE_LIFT_CONFIG=id("save_lift_config"),LIFT_PANEL_TRANSFORM=id("lift_panel_transform"),LIFT_BINDER_FLOOR=id("lift_binder_floor"),LIFT_CURSE_CONFIG=id("lift_curse_config"),ENTITY_EFFECT_SAVE=id("entity_effect_save"),ENTITY_EFFECT_SYNC=id("entity_effect_sync"),SAVE_TV_CONFIG=id("save_tv_config"),SCREAMER=id("screamer");
     private static Identifier id(String path){return FifthMod.id(path);} private FifthNetworking(){}
 
     public static void registerServer(){
         ServerPlayNetworking.registerGlobalReceiver(SAVE_LIFT_CONFIG,(server,player,handler,buf,responseSender)->{
             BlockPos pos=buf.readBlockPos();String liftId=buf.readString(64);int floor=buf.readVarInt();int mask=buf.readVarInt();BlockPos stage=buf.readBlockPos();
             server.execute(()->{if(!player.hasPermissionLevel(2))return;if(player.getWorld().getBlockEntity(pos) instanceof LiftBlockEntity lift){lift.setLiftId(liftId);lift.setCurrentFloor(floor);lift.setTargetFloor(floor);lift.setOpenFloorMask(mask);lift.setStageOrigin(stage);LiftManager.register(lift);player.sendMessage(Text.literal("§8[§cFiven§8] §7Лифт §f"+lift.getLiftId()+" §7сохранён."),true);}});
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(LIFT_CURSE_CONFIG,(server,player,handler,buf,responseSender)->{
+            BlockPos pos=buf.readBlockPos();boolean cursed=buf.readBoolean();
+            server.execute(()->{if(!player.hasPermissionLevel(2))return;if(player.getWorld().getBlockEntity(pos) instanceof LiftBlockEntity lift){lift.setCursed(cursed);player.sendMessage(Text.literal("§8[§cFiven§8] §7Тип лифта: "+(cursed?"§cПРОКЛЯТЫЙ":"§aОБЫЧНЫЙ")),true);}});
+        });
+
+        ServerPlayNetworking.registerGlobalReceiver(LIFT_BINDER_FLOOR,(server,player,handler,buf,responseSender)->{
+            int handIndex=buf.readVarInt();int floor=Math.max(1,Math.min(9,buf.readVarInt()));
+            server.execute(()->{Hand hand=handIndex==1?Hand.OFF_HAND:Hand.MAIN_HAND;ItemStack stack=player.getStackInHand(hand);if(stack.isOf(FifthMod.LIFT_BUTTON_BINDER)){stack.getOrCreateNbt().putInt("FivenBindFloor",floor);player.sendMessage(Text.literal("§8[§cFiven§8] §7Этаж для привязки: §c"+floor),true);}});
         });
 
         ServerPlayNetworking.registerGlobalReceiver(LIFT_PANEL_CONTROL,(server,player,handler,buf,responseSender)->{
@@ -67,7 +79,11 @@ public final class FifthNetworking {
         ServerPlayNetworking.registerGlobalReceiver(CUTSCENE_END_TELEPORT,(server,player,handler,buf,responseSender)->{String id=buf.readString(128);server.execute(()->{CutsceneDefinition scene=CutsceneManager.load(server,id);if(scene==null||!scene.teleportPlayerAtEnd||scene.keyframes.isEmpty())return;var end=scene.keyframes.get(scene.keyframes.size()-1);double eye=player.getEyeY()-player.getY();player.teleport(player.getServerWorld(),end.x,end.y-eye,end.z,end.yaw,end.pitch);});});
 
         ServerPlayNetworking.registerGlobalReceiver(REQUEST_NPC_LIBRARY,(server,player,handler,buf,responseSender)->server.execute(()->sendNpcLibrary(player)));
-        ServerPlayNetworking.registerGlobalReceiver(MFL_CONTROL,(server,player,handler,buf,responseSender)->{int entityId=buf.readVarInt();String action=buf.readString(64);String arg="animation".equals(action)?buf.readString(128):"";server.execute(()->{if(!player.hasPermissionLevel(2)||!(player.getWorld().getEntityById(entityId) instanceof ru.fifth.horror.entity.MonsterForLiftEntity m))return;switch(action){case "toggle_route"->{if(m.isRouteRunning())m.stopRoute();else m.startRoute(true,.72);}case "clear_route"->m.clearRoute();case "animation"->m.preview(arg);}});});
+        ServerPlayNetworking.registerGlobalReceiver(MFL_CONFIG,(server,player,handler,buf,responseSender)->{
+            int entityId=buf.readVarInt();int mode=buf.readVarInt();boolean hunt=buf.readBoolean(),patrol=buf.readBoolean();double range=buf.readDouble(),angle=buf.readDouble(),walk=buf.readDouble(),run=buf.readDouble();int search=buf.readVarInt();
+            server.execute(()->{if(!player.hasPermissionLevel(2)||!(player.getWorld().getEntityById(entityId) instanceof MonsterForLiftEntity m))return;m.setAiMode(MonsterForLiftEntity.AiMode.values()[Math.max(0,Math.min(MonsterForLiftEntity.AiMode.values().length-1,mode))]);m.setHuntEnabled(hunt);m.setPatrolEnabled(patrol);m.setVisionRange(range);m.setVisionAngle(angle);m.setWalkSpeed(walk);m.setRunSpeed(run);m.setSearchDurationTicks(search);});
+        });
+        ServerPlayNetworking.registerGlobalReceiver(MFL_CONTROL,(server,player,handler,buf,responseSender)->{int entityId=buf.readVarInt();String action=buf.readString(64);String arg="animation".equals(action)?buf.readString(128):"";server.execute(()->{if(!player.hasPermissionLevel(2)||!(player.getWorld().getEntityById(entityId) instanceof MonsterForLiftEntity m))return;switch(action){case "toggle_route"->{if(m.isRouteRunning())m.stopRoute();else m.startRoute(true,.72);}case "clear_route"->m.clearRoute();case "animation"->m.preview(arg);case "screamer"->m.triggerScreamer(player);}});});
         ServerPlayNetworking.registerGlobalReceiver(NPC_CONTROL,(server,player,handler,buf,responseSender)->{int entityId=buf.readVarInt();String action=buf.readString(64);buf.readString(256);server.execute(()->{if(!player.hasPermissionLevel(2)||!(player.getWorld().getEntityById(entityId) instanceof DirectorNpcEntity npc))return;FifthScriptEngine.indexNpc(npc);switch(action){case "toggle_ai"->npc.setAiEnabled(!npc.isAiEnabled());case "toggle_path"->{if(npc.isRouteRunning())npc.stopPath();else{npc.setAiEnabled(true);npc.followPath(true,.25);}}case "start_path"->{npc.setAiEnabled(true);npc.followPath(true,.25);}case "stop_path"->npc.stopPath();case "statue"->npc.setAiEnabled(false);case "start"->npc.setAiEnabled(true);}});});
         ServerPlayNetworking.registerGlobalReceiver(PREVIEW_NPC_ANIMATION,(server,player,handler,buf,responseSender)->{int entityId=buf.readVarInt();String file=buf.readString(512),animation=buf.readString(512);server.execute(()->{if(!player.hasPermissionLevel(2))return;if(player.getWorld().getEntityById(entityId) instanceof DirectorNpcEntity npc){FifthScriptEngine.indexNpc(npc);if(!file.isBlank())npc.setAnimationResource(file);npc.setCurrentAnimation(animation);}});});
     }
@@ -78,6 +94,5 @@ public final class FifthNetworking {
     public static void openLiftPanel(ServerPlayerEntity player,LiftPanelBlockEntity panel,boolean edit){int mask=panel.getEnabledMask();LiftBlockEntity lift=panel.resolveLift(player.getServer());if(lift!=null)mask=lift.getOpenFloorMask();PacketByteBuf out=PacketByteBufs.create();out.writeBlockPos(panel.getPos());out.writeVarInt(mask);out.writeBoolean(edit);ServerPlayNetworking.send(player,OPEN_LIFT_PANEL,out);}
     public static void openLiftEditor(ServerPlayerEntity player,LiftBlockEntity lift){PacketByteBuf out=PacketByteBufs.create();out.writeBlockPos(lift.getPos());out.writeString(lift.getLiftId(),64);out.writeVarInt(lift.getCurrentFloor());out.writeVarInt(lift.getOpenFloorMask());out.writeBlockPos(lift.getStageOrigin());ServerPlayNetworking.send(player,OPEN_LIFT_EDITOR,out);}
     public static void openComputer(ServerPlayerEntity player,ScriptComputerBlockEntity be){PacketByteBuf out=PacketByteBufs.create();out.writeBlockPos(be.getPos());out.writeString(be.getScriptName());out.writeString(be.getScript(),1_000_000);ServerPlayNetworking.send(player,OPEN_COMPUTER,out);}
-
     public static void sendScreamer(ServerPlayerEntity player,int ticks,float intensity){PacketByteBuf out=PacketByteBufs.create();out.writeVarInt(Math.max(1,Math.min(200,ticks)));out.writeFloat(Math.max(.1f,Math.min(3f,intensity)));ServerPlayNetworking.send(player,SCREAMER,out);}
 }

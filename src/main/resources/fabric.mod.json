@@ -7,7 +7,11 @@
   "authors": ["Denis18UKS"],
   "environment": "*",
   "entrypoints": {
-    "main": ["ru.fifth.horror.FifthMod"],
+    "main": [
+      "ru.fifth.horror.FifthMod",
+      "ru.fifth.horror.FivenExtraContent",
+      "ru.fifth.horror.CursedLiftCommands"
+    ],
     "client": ["ru.fifth.horror.client.FifthClient"]
   },
   "mixins": ["fifth.mixins.json"],

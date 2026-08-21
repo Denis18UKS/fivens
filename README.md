@@ -4,33 +4,79 @@ Fabric 1.20.1 toolkit for building cinematic multiplayer horror maps directly in
 
 ## Included
 - Custom horror title screen for «Пятый» with hidden director-studio access.
-- Scriptable NPCs: no AI/script = statue.
-- In-game NPC template editor and 64x64 skin editor with base/overlay layer filtering.
-- GeckoLib model/animation resource fields and automatic animation discovery on resource reload.
-- NPC path authoring tool with persistent NPC selection and indexed runtime lookup.
-- FifthScript sandbox computer with PHP-like commands for NPC AI, triggers and layers.
-- Cutscene camera keyframes, FOV, subtitles, HUD/control lock, optional end teleport and VHS cassette creation.
-- Cutscene library + VHS recording/playback with post-processing and fallback scanlines.
-- Structure snapshot variants/layers with default-active, restore-on-load and replacement groups.
-- Physical lift `Block + BlockEntity`, wall-mounted floor panels, independent floor sets keyed by `liftId:floor`, and per-floor door permissions.
-- World-space entity horror effects, MFL animation editor, animation conditions and screamer actions.
-- `/fiven tools` gives all authoring tools.
+- Scriptable NPCs: no AI/script = statue; routes, start/stop state, scripts and animation control are authored in-game.
+- In-game NPC editor with automatic GeckoLib animation discovery and a live 64×64 PNG skin editor: pencil, line, eraser, color picker, undo, 3D preview, PNG export and server persistence.
+- FifthScript sandbox computer with PHP-like commands for NPC AI, triggers, layers and cutscene playback.
+- Cutscene camera keyframes, FOV, subtitles, HUD/control lock, optional end teleport, searchable cutscene library and VHS cassette creation.
+- Physical VHS workflow: cassette-drive insert/eject transitions, required TV link, static/no-signal phase and TV-only playback. During playback a separate recorded camera renders the Minecraft world into a 256×144 off-screen framebuffer; the resulting VHS-processed texture is mapped only to the television screen. A safe timeline fallback is kept for GPUs/drivers that reject secondary world rendering.
+- Physical lift Block + BlockEntity with independent `liftId:floor` sets, wall floor panels, vanilla stone-button calls, per-floor door permissions, red floor travel overlay and persistent NORMAL/CURSED mode.
+- Cursed-lift arrival events can bind a saved cutscene, FifthScript scenario and/or named trigger to a particular floor; manual paranormal test events are also available.
+- MFL with explicit `OFF / LOGICAL / SCRIPTED` AI, no random wandering, player-only hunt/search/chase, vision settings, routes, screamers and authored hiding volumes for cupboards/closets.
+- Structure snapshot variants/layers with default-active and restore-on-load behavior.
+- World-space entity horror effects with protected entries that can survive bulk clearing.
+- Decorative `clock_arms` wall block and the complete director-tool creative tab.
+- `/fiven tools` gives the complete authoring tool set, including MFL hiding-zone authoring and clock arms.
 
 ## GUI tools: RMB-first workflow
-Every Fiven item whose main purpose is a GUI opens its interface with right click while held.
+Every Fiven item whose main purpose is a GUI opens its interface with right click while held. Editors that need a target open a searchable nearby-target selector when right-clicked in the air; direct right-click on a concrete NPC/entity/lift/panel still opens that target immediately where applicable.
 
-Editors that need a target (NPC, MFL, animation-condition entity, lift, lift panel or TV) open a searchable nearby-target selector when right-clicked in the air. Direct right-click on a concrete NPC/entity/lift/panel still opens that target immediately where applicable.
-
-Tools whose purpose is direct world editing rather than a GUI (path points, linking, stone-button binding, etc.) keep their world interaction behavior.
+World-authoring tools such as paths, linking, MFL hiding-zone selection and stone-button binding keep their direct in-world behavior.
 
 ## Lift floor sets
-New lifts are physical blocks. Each independent lift should have a unique ID in the in-game Lift Editor. Use the same ID as the floor-set ID when capturing floor layers. This allows multiple lifts to reuse floors 1–9 without overwriting each other.
+New lifts are physical blocks. Give every independent lift a unique ID in the Lift Editor and use the same ID as the floor-set ID when capturing floor layers. Multiple lifts can therefore reuse floors 1–9 without overwriting each other.
 
-Old maps that have floor data without a floor-set ID are treated as `default` and remain available as a compatibility fallback. Legacy entity lift/panel registrations are retained only so older worlds can load and be migrated.
+Old floor data without a set ID is treated as `default` for compatibility. A blocked-door floor remains a valid destination: the lift arrives but its doors do not open. Floors 2, 5 and 8 are blocked by default.
 
-A blocked-door floor is still a valid travel destination: the lift arrives, but the doors stay closed. Floors 2, 5 and 8 are blocked by default.
+A vanilla stone button can be linked to a physical lift with Lift Button Binder. The binder has explicit floor selection; bound buttons are handled by Fiven instead of acting as normal redstone switches.
 
-A vanilla stone button can be bound to a physical lift with Lift Button Binder. Bound buttons are handled by Fiven instead of acting as ordinary redstone switches.
+### Cursed lift authoring
+Near the physical lift:
+
+```text
+/fiven lift-type normal
+/fiven lift-type cursed
+/fiven lift-event bind-cutscene <1-9> <cutscene_id>
+/fiven lift-event bind-script <1-9> <script_name>
+/fiven lift-event bind-trigger <1-9> <trigger_name>
+/fiven lift-event status <1-9>
+/fiven lift-event clear <1-9>
+/fiven lift-event slam
+/fiven lift-event screamer
+/fiven lift-event wrong-floor
+```
+
+Configured arrival events are deterministic: they run only after the requested destination layer has actually been restored and the cursed lift has completed the ride.
+
+## MFL hiding zones
+Use `MFL Hiding Zones` in-world:
+- first RMB selects point A;
+- second RMB selects point B and saves the hiding volume;
+- Shift+RMB inside a saved zone removes it.
+
+A survival/adventure player whose body is inside one of these volumes is ignored by MFL's LOGICAL target acquisition. Zones are stored per world/dimension.
+
+Useful commands:
+
+```text
+/fiven hiding-zones status
+/fiven hiding-zones clear
+```
+
+## Director utility commands
+```text
+/fiven tools
+/fiven reload-scripts
+/fiven restore-defaults
+/fiven shader clear
+/tpe <x> <y> <z> [yaw] [pitch]
+/lift <1-9>
+/fiven animation play <target> <animation>
+/fiven animation stop <target>
+/fiven animation condition <id>
+/fivenanim ...
+```
+
+`/fiven shader clear` removes Fiven entity effects except entries explicitly protected in the entity-effect editor.
 
 ## FifthScript examples
 ```php
@@ -57,4 +103,4 @@ Windows:
 gradlew.bat clean build
 ```
 
-Every pull request is validated by the Java 17 Gradle build workflow and publishes the built JARs as the `fivens-build` workflow artifact after a successful build.
+Every pull request is validated by the Java 17 Gradle build workflow. On success the built JARs are published as the `fivens-build` GitHub Actions artifact.

@@ -17,7 +17,7 @@ import ru.fifth.horror.block.LiftBlockEntity;
 import ru.fifth.horror.entity.LiftEntity;
 import ru.fifth.horror.lift.LiftManager;
 
-/** Uses a vanilla stone button; this tool only selects a physical lift block and binds a floor. */
+/** Selects a physical lift and binds an explicit GUI-selected floor to a vanilla Stone Button. */
 public final class LiftButtonBinderItem extends Item {
     public LiftButtonBinderItem(Settings settings) { super(settings); }
 
@@ -34,8 +34,10 @@ public final class LiftButtonBinderItem extends Item {
                 var nbt = stack.getOrCreateNbt();
                 nbt.putString("FivenLiftWorld", world.getRegistryKey().getValue().toString());
                 nbt.putLong("FivenLiftPos", clicked.asLong());
+                nbt.putString("FivenLiftName", lift.getLiftId());
                 nbt.remove("FivenLiftUuid");
-                player.sendMessage(Text.literal("§8[§cFiven§8] §7Выбран блок лифта: §f" + lift.getLiftId() + "§7. ПКМ в воздухе меняет этаж."), true);
+                if (!nbt.contains("FivenBindFloor")) nbt.putInt("FivenBindFloor", 1);
+                player.sendMessage(Text.literal("§8[§cFiven§8] §7Выбран лифт §f" + lift.getLiftId() + "§7. ПКМ в воздухе → выбери этаж из списка."), true);
             }
             return ActionResult.success(world.isClient);
         }
@@ -51,30 +53,23 @@ public final class LiftButtonBinderItem extends Item {
         }
         String liftWorld = nbt.getString("FivenLiftWorld");
         BlockPos liftPos = BlockPos.fromLong(nbt.getLong("FivenLiftPos"));
-        int floor = nbt.contains("FivenBindFloor") ? nbt.getInt("FivenBindFloor") : 1;
-        floor = Math.max(1, Math.min(9, floor));
+        int floor = Math.max(1, Math.min(9, nbt.contains("FivenBindFloor") ? nbt.getInt("FivenBindFloor") : 1));
         if (LiftManager.findLift(serverWorld.getServer(), liftWorld, liftPos) == null) {
             player.sendMessage(Text.literal("§8[§cFiven§8] §cВыбранный блок лифта больше не найден. Выбери его заново."), true);
             return ActionResult.FAIL;
         }
         LiftManager.bindButton(serverWorld.getServer(), serverWorld, clicked, liftWorld, liftPos, floor);
-        player.sendMessage(Text.literal("§8[§cFiven§8] §7Каменная кнопка теперь вызывает лифт на этаж §c" + floor + "§7 и не используется как redstone-кнопка."), true);
+        player.sendMessage(Text.literal("§8[§cFiven§8] §7Stone Button → §f" + nbt.getString("FivenLiftName") + " §7/ этаж §c" + floor), true);
         return ActionResult.SUCCESS;
     }
 
     @Override
     public TypedActionResult<ItemStack> use(World world, PlayerEntity user, Hand hand) {
-        ItemStack stack = user.getStackInHand(hand);
-        if (!world.isClient) {
-            int floor = stack.getOrCreateNbt().getInt("FivenBindFloor");
-            floor = floor < 1 || floor >= 9 ? 1 : floor + 1;
-            stack.getOrCreateNbt().putInt("FivenBindFloor", floor);
-            user.sendMessage(Text.literal("§8[§cFiven§8] §7Этаж для следующей привязки: §c" + floor), true);
-        }
-        return TypedActionResult.success(stack, world.isClient);
+        // The client opens LiftButtonBinderScreen. No more hidden floor cycling.
+        return TypedActionResult.success(user.getStackInHand(hand), world.isClient);
     }
 
-    /** Legacy migration helper for old entity lifts. Legacy selection is routed through UseEntityCallback. */
+    /** Legacy migration helper for old entity lifts. */
     public static ActionResult selectLift(ItemStack stack, PlayerEntity player, LiftEntity lift) {
         if (!player.getWorld().isClient) {
             stack.getOrCreateNbt().putString("FivenLiftUuid", lift.getUuidAsString());

@@ -26,6 +26,7 @@ public final class EntityShaderScreen extends HorrorScreen {
     private final List<Entity> entities = new ArrayList<>();
     private UUID selected;
     private String type = "dark", status = "";
+    private boolean protectedFromClear;
     private int page;
     private int rows = 6;
 
@@ -38,7 +39,7 @@ public final class EntityShaderScreen extends HorrorScreen {
     protected void init() {
         beginHorrorInit();
         int w = contentWidth(600), x = (width - w) / 2, y = safeTop(), g = 6, bh = 20;
-        rows = Math.max(2, Math.min(9, (height - y - safeBottom() - 168) / 24));
+        rows = Math.max(2, Math.min(8, (height - y - safeBottom() - 196) / 24));
 
         String oldSearch = search == null ? "" : search.getText();
         search = horrorField(x, y, w, bh, oldSearch, 128);
@@ -65,7 +66,13 @@ public final class EntityShaderScreen extends HorrorScreen {
         oz = horrorField(x + (col + g) * 3, fieldsY, col, bh, "0", 12);
         intensity = horrorField(x + (col + g) * 4, fieldsY, w - (col + g) * 4, bh, "1.0", 8);
 
-        int navY = fieldsY + 28;
+        int protectY = fieldsY + 28;
+        addDrawableChild(HorrorButton.builder(Text.literal(protectText()), b -> {
+            protectedFromClear = !protectedFromClear;
+            b.setMessage(Text.literal(protectText()));
+        }).dimensions(x, protectY, w, bh).build());
+
+        int navY = protectY + 28;
         addDrawableChild(HorrorButton.builder(Text.literal("‹"), b -> { if (page > 0) { page--; refresh(); } })
                 .dimensions(x, navY, 48, bh).build());
         addDrawableChild(HorrorButton.builder(Text.literal("Привязать / обновить эффект"), b -> save())
@@ -82,11 +89,12 @@ public final class EntityShaderScreen extends HorrorScreen {
 
     private String typeText() {
         return switch (type) {
-            case "dark" -> "Эффект: ТЁМНЫЕ СГУСТКИ (shader)";
-            case "eyes" -> "Эффект: СВЕТЯЩИЕСЯ ГЛАЗА (shader)";
+            case "dark" -> "Эффект: ТЁМНЫЕ СГУСТКИ (world-space)";
+            case "eyes" -> "Эффект: СВЕТЯЩИЕСЯ ГЛАЗА (head-space)";
             default -> "Эффект: ВЫКЛЮЧИТЬ";
         };
     }
+    private String protectText(){return "Исключить из /fiven shader clear: "+(protectedFromClear?"ДА":"НЕТ");}
 
     private void reload() {
         entities.clear();
@@ -143,7 +151,7 @@ public final class EntityShaderScreen extends HorrorScreen {
             b.writeString(selected.toString(), 64);
             b.writeString(type, 16);
             b.writeInt(argb);
-            b.writeDouble(x); b.writeDouble(y); b.writeDouble(z); b.writeFloat(in);
+            b.writeDouble(x); b.writeDouble(y); b.writeDouble(z); b.writeFloat(in); b.writeBoolean(protectedFromClear);
             ClientPlayNetworking.send(FifthNetworking.ENTITY_EFFECT_SAVE, b);
             status = "Эффект сохранён.";
         } catch (Exception e) {

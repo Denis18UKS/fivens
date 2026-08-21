@@ -35,21 +35,22 @@ import ru.fifth.horror.FifthMod;
 import ru.fifth.horror.lift.LiftManager;
 import ru.fifth.horror.network.FifthNetworking;
 
-/**
- * The physical elevator cabin. The GeckoLib model is rendered by a BlockEntity renderer;
- * collision is built from the same dimensions as lift.geo.json and changes with the doors.
- */
+/** Physical elevator cabin. Collision mirrors the latest supplied GeckoLib geometry. */
 public final class LiftBlock extends BlockWithEntity {
     public static final DirectionProperty FACING = Properties.HORIZONTAL_FACING;
     public static final BooleanProperty OPEN = Properties.OPEN;
 
-    // lift.geo.json uses 16 model units per block and is centred on the origin.
-    private static final VoxelShape FLOOR = Block.createCuboidShape(-16, 0, -16, 32, 2, 32);
-    private static final VoxelShape CEILING = Block.createCuboidShape(-16, 34, -16, 32, 36, 32);
-    private static final VoxelShape LEFT_WALL = Block.createCuboidShape(-16, 2, -16, -12, 34, 32);
-    private static final VoxelShape RIGHT_WALL = Block.createCuboidShape(28, 2, -16, 32, 34, 32);
-    private static final VoxelShape BACK_WALL = Block.createCuboidShape(-12, 2, 28, 28, 34, 32);
-    private static final VoxelShape DOORS = Block.createCuboidShape(-12, 2, -16, 28, 34, -12);
+    /*
+     * Blockbench geometry is centered around model X/Z=0 while a Minecraft VoxelShape is centered
+     * at local 8/8. Therefore model coordinates are translated by +8 on X/Z. The previous version
+     * used raw model coordinates, which is why the visible cabin and collision were offset.
+     */
+    private static final VoxelShape FLOOR = Block.createCuboidShape(0, 0, 0, 16, 2, 16);
+    private static final VoxelShape CEILING = Block.createCuboidShape(0, 34, 0, 16, 36, 20);
+    private static final VoxelShape LEFT_WALL = Block.createCuboidShape(-4, 0, 0, 0, 36, 20);
+    private static final VoxelShape RIGHT_WALL = Block.createCuboidShape(16, 0, 0, 20, 36, 20);
+    private static final VoxelShape BACK_WALL = Block.createCuboidShape(0, 0, 16, 16, 34, 20);
+    private static final VoxelShape DOORS = Block.createCuboidShape(0, 2, 0, 16, 34, 4);
     private static final VoxelShape CABIN_OPEN = VoxelShapes.union(FLOOR, CEILING, LEFT_WALL, RIGHT_WALL, BACK_WALL);
     private static final VoxelShape CABIN_CLOSED = VoxelShapes.union(CABIN_OPEN, DOORS);
 
@@ -64,20 +65,9 @@ public final class LiftBlock extends BlockWithEntity {
         return getDefaultState().with(FACING, ctx.getHorizontalPlayerFacing().getOpposite()).with(OPEN, false);
     }
 
-    @Override
-    protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
-        builder.add(FACING, OPEN);
-    }
-
-    @Override
-    public BlockState rotate(BlockState state, BlockRotation rotation) {
-        return state.with(FACING, rotation.rotate(state.get(FACING)));
-    }
-
-    @Override
-    public BlockState mirror(BlockState state, BlockMirror mirror) {
-        return state.rotate(mirror.getRotation(state.get(FACING)));
-    }
+    @Override protected void appendProperties(StateManager.Builder<Block, BlockState> builder) { builder.add(FACING, OPEN); }
+    @Override public BlockState rotate(BlockState state, BlockRotation rotation) { return state.with(FACING, rotation.rotate(state.get(FACING))); }
+    @Override public BlockState mirror(BlockState state, BlockMirror mirror) { return state.rotate(mirror.getRotation(state.get(FACING))); }
 
     @Override
     public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext context) {
@@ -89,15 +79,8 @@ public final class LiftBlock extends BlockWithEntity {
         return getOutlineShape(state, world, pos, context);
     }
 
-    @Override
-    public BlockRenderType getRenderType(BlockState state) {
-        return BlockRenderType.ENTITYBLOCK_ANIMATED;
-    }
-
-    @Override
-    public BlockEntity createBlockEntity(BlockPos pos, BlockState state) {
-        return new LiftBlockEntity(pos, state);
-    }
+    @Override public BlockRenderType getRenderType(BlockState state) { return BlockRenderType.ENTITYBLOCK_ANIMATED; }
+    @Override public BlockEntity createBlockEntity(BlockPos pos, BlockState state) { return new LiftBlockEntity(pos, state); }
 
     @Nullable
     @Override
@@ -108,16 +91,12 @@ public final class LiftBlock extends BlockWithEntity {
     @Override
     public void onPlaced(World world, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {
         super.onPlaced(world, pos, state, placer, stack);
-        if (!world.isClient && world.getBlockEntity(pos) instanceof LiftBlockEntity lift) {
-            LiftManager.register(lift);
-        }
+        if (!world.isClient && world.getBlockEntity(pos) instanceof LiftBlockEntity lift) LiftManager.register(lift);
     }
 
     @Override
     public void onStateReplaced(BlockState state, World world, BlockPos pos, BlockState newState, boolean moved) {
-        if (!state.isOf(newState.getBlock()) && world.getBlockEntity(pos) instanceof LiftBlockEntity lift) {
-            LiftManager.unregister(lift);
-        }
+        if (!state.isOf(newState.getBlock()) && world.getBlockEntity(pos) instanceof LiftBlockEntity lift) LiftManager.unregister(lift);
         super.onStateReplaced(state, world, pos, newState, moved);
     }
 
@@ -127,9 +106,7 @@ public final class LiftBlock extends BlockWithEntity {
         ItemStack held = player.getStackInHand(hand);
 
         if (held.isOf(FifthMod.LIFT_EDITOR_TOOL)) {
-            if (!world.isClient && player instanceof ServerPlayerEntity serverPlayer && serverPlayer.hasPermissionLevel(2)) {
-                FifthNetworking.openLiftEditor(serverPlayer, lift);
-            }
+            if (!world.isClient && player instanceof ServerPlayerEntity serverPlayer && serverPlayer.hasPermissionLevel(2)) FifthNetworking.openLiftEditor(serverPlayer, lift);
             return ActionResult.success(world.isClient);
         }
 
@@ -143,18 +120,15 @@ public final class LiftBlock extends BlockWithEntity {
         }
 
         if (player.isSneaking()) {
-            if (!world.isClient) {
-                player.sendMessage(Text.literal("§8[§cFiven§8] §7Лифт §f" + lift.getLiftId() + " §7| этаж §c" + lift.getCurrentFloor() + " §7| слой от §f" + lift.getStageOrigin().toShortString()), true);
-            }
+            if (!world.isClient) player.sendMessage(Text.literal("§8[§cFiven§8] §7Лифт §f" + lift.getLiftId() + " §7| этаж §c" + lift.getCurrentFloor() + " §7| тип §f" + (lift.isCursed() ? "ПРОКЛЯТЫЙ" : "ОБЫЧНЫЙ") + " §7| слой от §f" + lift.getStageOrigin().toShortString()), true);
             return ActionResult.success(world.isClient);
         }
 
         if (!world.isClient) {
-            if (lift.canOpenOnFloor(lift.getCurrentFloor())) {
-                lift.openDoors(80);
-            } else {
+            if (lift.canOpenOnFloor(lift.getCurrentFloor())) lift.openDoors(80);
+            else {
                 player.sendMessage(Text.literal("§8[§cFiven§8] §7Двери на этаже §c" + lift.getCurrentFloor() + " §7заблокированы."), true);
-                if (world instanceof ServerWorld sw) sw.playSound(null, pos, net.minecraft.sound.SoundEvents.BLOCK_IRON_DOOR_CLOSE, net.minecraft.sound.SoundCategory.BLOCKS, 0.8f, 0.7f);
+                if (world instanceof ServerWorld sw) sw.playSound(null, pos, net.minecraft.sound.SoundEvents.BLOCK_IRON_DOOR_CLOSE, net.minecraft.sound.SoundCategory.BLOCKS, .8f, .7f);
             }
         }
         return ActionResult.success(world.isClient);

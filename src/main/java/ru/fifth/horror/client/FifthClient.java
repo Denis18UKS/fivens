@@ -133,9 +133,23 @@ public final class FifthClient implements ClientModInitializer {
             if (!Screen.hasShiftDown()) { lines.add(Text.literal("§8Зажмите Shift для описания")); return; }
             for (String line : description(id.getPath()).split("\\n")) lines.add(Text.literal("§7" + line));
         });
-        HudRenderCallback.EVENT.register((draw, tickDelta) -> { LiftTravelOverlay.render(draw); VhsPlayback.render(draw); ScreamerOverlay.render(draw); });
+        HudRenderCallback.EVENT.register((draw, tickDelta) -> {
+            // Real VHS camera frames are rendered into a tiny off-screen framebuffer after the normal world frame.
+            VhsWorldCapture.captureNext(tickDelta);
+            LiftTravelOverlay.render(draw);
+            VhsPlayback.render(draw);
+            ScreamerOverlay.render(draw);
+        });
         ClientTickEvents.START_CLIENT_TICK.register(CutsceneInputLock::apply);
-        ClientTickEvents.END_CLIENT_TICK.register(client -> { MenuMusicController.tick(client); LiftTravelOverlay.tick(); VhsPlayback.tick(); ScreamerOverlay.tick(); CutscenePlayback.tick(); CutsceneInputLock.apply(client); });
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            MenuMusicController.tick(client);
+            LiftTravelOverlay.tick();
+            VhsPlayback.tick();
+            ScreamerOverlay.tick();
+            CutscenePlayback.tick();
+            CutsceneInputLock.apply(client);
+            if (client.world == null) VhsWorldCapture.clear();
+        });
     }
 
     /** Opens every GUI-oriented tool from the held stack. */
@@ -170,9 +184,9 @@ public final class FifthClient implements ClientModInitializer {
         case "lift_panel" -> "Настенная панель этажей 1–9.\nСвяжи её с лифтом через Lift Panel Tool.";
         case "lift_button_binder" -> "Привязка обычной каменной кнопки к лифту.\nПКМ по лифту → выбери этаж → ПКМ по Stone Button.";
         case "lift_panel_tool" -> "Связывает панель этажей с выбранным блоком лифта.\nПКМ открывает список панелей.";
-        case "lift_editor_tool" -> "Редактор ID, этажей, дверей и области слоёв.\nПКМ открывает список ближайших лифтов.";
-        case "vhs_cassette" -> "VHS-кассета. Может хранить ID записи катсцены.";
-        case "television" -> "Телевизор Fiven для воспроизведения VHS-записей.";
+        case "lift_editor_tool" -> "Редактор ID, этажей, дверей, слоёв и типа ОБЫЧНЫЙ/ПРОКЛЯТЫЙ.";
+        case "vhs_cassette" -> "VHS-кассета. Хранит запись режиссёрской камеры для настоящего TV-only воспроизведения.";
+        case "television" -> "Телевизор Fiven. Показывает off-screen рендер мира с позиции записанной камеры.";
         case "cassette_drive" -> "Кассетовод. ПКМ кассетой — вставить; Shift+ПКМ — извлечь.";
         case "tv_link_tool" -> "Связывает телевизор и кассетовод.\nПКМ открывает настройки или список телевизоров.";
         case "camera_tool" -> "Режиссёрская камера: ключевые кадры, запись и получение кассеты.\nПКМ открывает редактор.";
@@ -180,11 +194,13 @@ public final class FifthClient implements ClientModInitializer {
         case "animation_condition_tool" -> "Условия анимаций и скримеров.\nПКМ открывает выбор сущности.";
         case "entity_shader_tool" -> "Привязывает world-space хоррор-эффекты к сущностям.\nПКМ открывает редактор.";
         case "mfl_spawn_egg" -> "Яйцо monster_for_lift (MFL).";
-        case "mfl_editor_tool" -> "Настройки MFL, маршрута и личных анимаций.\nПКМ открывает выбор MFL.";
+        case "mfl_editor_tool" -> "Настройки MFL, маршрута, LOGICAL/SCRIPTED AI и личных анимаций.";
         case "mfl_path_tool" -> "Прокладывает маршрут выбранного MFL по точкам.";
+        case "mfl_hiding_tool" -> "Размечает шкафы/ниши, где LOGICAL MFL не видит игрока.\nПКМ: A/B, Shift+ПКМ: удалить зону.";
+        case "clock_arms" -> "Декоративные настенные стрелки часов для постановки хоррор-сцен.";
         case "npc_creator" -> "Создаёт шаблон нового режиссёрского NPC.\nПКМ открывает редактор создания.";
         case "npc_spawn_egg" -> "Спавнит NPC из сохранённого шаблона.";
-        case "npc_editor_tool" -> "Визуальный редактор NPC.\nПКМ открывает выбор ближайшего NPC.";
+        case "npc_editor_tool" -> "Визуальный редактор NPC, анимаций и live PNG-текстуры.";
         case "npc_path_tool" -> "Создаёт и редактирует маршрут выбранного NPC.";
         case "npc_state_tool" -> "Переключает состояние/активность NPC.";
         case "npc_link_tool" -> "Связывает NPC со сценарным компьютером.";

@@ -36,13 +36,15 @@ public final class MflEditorScreen extends HorrorScreen {
     protected void init() {
         beginHorrorInit();
         int w = contentWidth(520), x = (width - w) / 2, y = safeTop(), bh = 21, gap = 6;
-        rows = Math.max(2, Math.min(9, (height - y - safeBottom() - 170) / 25));
+        rows = Math.max(2, Math.min(8, (height - y - safeBottom() - 200) / 25));
 
-        int half = (w - gap) / 2;
-        addDrawableChild(HorrorButton.builder(Text.literal("▶ / ■ Маршрут MFL"), b -> send("toggle_route"))
-                .dimensions(x, y, half, bh).build());
+        int third = (w - gap * 2) / 3;
+        addDrawableChild(HorrorButton.builder(Text.literal("▶ / ■ Маршрут"), b -> send("toggle_route"))
+                .dimensions(x, y, third, bh).build());
         addDrawableChild(HorrorButton.builder(Text.literal("Очистить маршрут"), b -> send("clear_route"))
-                .dimensions(x + half + gap, y, half, bh).build());
+                .dimensions(x + third + gap, y, third, bh).build());
+        addDrawableChild(HorrorButton.builder(Text.literal("ИИ / Охота"), b -> openAi())
+                .dimensions(x + (third + gap) * 2, y, w - (third + gap) * 2, bh).build());
 
         String oldSearch = search == null ? "" : search.getText();
         search = horrorField(x, y + 28, w, bh, oldSearch, 96);
@@ -59,15 +61,22 @@ public final class MflEditorScreen extends HorrorScreen {
         int navY = listY + rows * 25 + 3;
         addDrawableChild(HorrorButton.builder(Text.literal("‹"), b -> { if (page > 0) { page--; refresh(); } })
                 .dimensions(x, navY, 48, bh).build());
-        addDrawableChild(HorrorButton.builder(Text.literal("▶ Проиграть выбранную"), b -> {
-            if (!selected.isBlank()) anim(selected);
-        }).dimensions(x + 54, navY, w - 108, bh).build());
-        addDrawableChild(HorrorButton.builder(Text.literal("›"), b -> {
-            if ((page + 1) * rows < filtered().size()) { page++; refresh(); }
-        }).dimensions(x + w - 48, navY, 48, bh).build());
+        addDrawableChild(HorrorButton.builder(Text.literal("▶ Проиграть выбранную"), b -> { if (!selected.isBlank()) anim(selected); })
+                .dimensions(x + 54, navY, w - 108, bh).build());
+        addDrawableChild(HorrorButton.builder(Text.literal("›"), b -> { if ((page + 1) * rows < filtered().size()) { page++; refresh(); } })
+                .dimensions(x + w - 48, navY, 48, bh).build());
+        addDrawableChild(HorrorButton.builder(Text.literal("■ Стоп / idle"), b -> anim("idle"))
+                .dimensions(x, navY + 28, (w-gap)/2, bh).build());
+        addDrawableChild(HorrorButton.builder(Text.literal("Тест скримера"), b -> send("screamer"))
+                .dimensions(x+(w-gap)/2+gap, navY + 28, (w-gap)/2, bh).build());
         addDrawableChild(HorrorButton.builder(Text.literal("Назад"), b -> client.setScreen(parent))
-                .dimensions(x, navY + 28, w, bh).build());
+                .dimensions(x, navY + 56, w, bh).build());
         refresh();
+    }
+
+    private void openAi(){
+        if(client!=null&&client.world!=null&&client.world.getEntityById(id) instanceof MonsterForLiftEntity mfl){client.setScreen(new MflAiScreen(this,mfl));}
+        else status="MFL больше не найден.";
     }
 
     private List<AnimationCatalog.Entry> filtered() {
@@ -130,7 +139,7 @@ public final class MflEditorScreen extends HorrorScreen {
     @Override
     public void render(DrawContext c, int mx, int my, float d) {
         horrorBackground(c);
-        c.drawCenteredTextWithShadow(textRenderer, "Анимации берутся автоматически из модели MFL", width / 2,
+        c.drawCenteredTextWithShadow(textRenderer, "Анимации берутся автоматически из monster_for_lift.animation.json", width / 2,
                 Math.max(22, safeTop() - 12), 0xFFD0B9AE);
         if (!status.isBlank()) c.drawCenteredTextWithShadow(textRenderer, status, width / 2,
                 height - safeBottom() - 11, 0xFFD89090);
