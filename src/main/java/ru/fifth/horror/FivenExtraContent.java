@@ -24,10 +24,7 @@ import ru.fifth.horror.effect.EntityEffectManager;
 import ru.fifth.horror.lift.LiftManager;
 import ru.fifth.horror.network.FifthNetworking;
 
-/**
- * Small extension entrypoint for director utilities that can evolve independently from the main registry.
- * Keeping these additions separate also avoids disturbing the already-stable FifthMod bootstrap.
- */
+/** Extra director utilities kept separate from the stable core bootstrap. */
 public final class FivenExtraContent implements ModInitializer {
     public static final Block CLOCK_ARMS = Registry.register(Registries.BLOCK, FifthMod.id("clock_arms"),
             new ClockArmsBlock(AbstractBlock.Settings.create().strength(1.2f).nonOpaque()));
@@ -42,30 +39,34 @@ public final class FivenExtraContent implements ModInitializer {
 
     private static void registerCommands() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-            dispatcher.register(CommandManager.literal("tpe")
-                    .requires(source -> source.hasPermissionLevel(2))
-                    .then(CommandManager.argument("x", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0))
-                            .then(CommandManager.argument("y", DoubleArgumentType.doubleArg(-2048.0, 4096.0))
-                                    .then(CommandManager.argument("z", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0))
-                                            .executes(ctx -> teleportExact(ctx.getSource(),
-                                                    DoubleArgumentType.getDouble(ctx, "x"),
-                                                    DoubleArgumentType.getDouble(ctx, "y"),
-                                                    DoubleArgumentType.getDouble(ctx, "z"), null, null))
-                                            .then(CommandManager.argument("yaw", DoubleArgumentType.doubleArg(-180.0, 180.0))
-                                                    .executes(ctx -> teleportExact(ctx.getSource(),
-                                                            DoubleArgumentType.getDouble(ctx, "x"),
-                                                            DoubleArgumentType.getDouble(ctx, "y"),
-                                                            DoubleArgumentType.getDouble(ctx, "z"),
-                                                            (float) DoubleArgumentType.getDouble(ctx, "yaw"), null))
-                                                    .then(CommandManager.argument("pitch", DoubleArgumentType.doubleArg(-90.0, 90.0))
-                                                            .executes(ctx -> teleportExact(ctx.getSource(),
-                                                                    DoubleArgumentType.getDouble(ctx, "x"),
-                                                                    DoubleArgumentType.getDouble(ctx, "y"),
-                                                                    DoubleArgumentType.getDouble(ctx, "z"),
-                                                                    (float) DoubleArgumentType.getDouble(ctx, "yaw"),
-                                                                    (float) DoubleArgumentType.getDouble(ctx, "pitch"))))))));
+            var pitch = CommandManager.argument("pitch", DoubleArgumentType.doubleArg(-90.0, 90.0))
+                    .executes(ctx -> teleportExact(ctx.getSource(),
+                            DoubleArgumentType.getDouble(ctx, "x"),
+                            DoubleArgumentType.getDouble(ctx, "y"),
+                            DoubleArgumentType.getDouble(ctx, "z"),
+                            (float) DoubleArgumentType.getDouble(ctx, "yaw"),
+                            (float) DoubleArgumentType.getDouble(ctx, "pitch")));
 
-            dispatcher.register(CommandManager.literal("fiven")
+            var yaw = CommandManager.argument("yaw", DoubleArgumentType.doubleArg(-180.0, 180.0))
+                    .executes(ctx -> teleportExact(ctx.getSource(),
+                            DoubleArgumentType.getDouble(ctx, "x"),
+                            DoubleArgumentType.getDouble(ctx, "y"),
+                            DoubleArgumentType.getDouble(ctx, "z"),
+                            (float) DoubleArgumentType.getDouble(ctx, "yaw"), null))
+                    .then(pitch);
+
+            var z = CommandManager.argument("z", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0))
+                    .executes(ctx -> teleportExact(ctx.getSource(),
+                            DoubleArgumentType.getDouble(ctx, "x"),
+                            DoubleArgumentType.getDouble(ctx, "y"),
+                            DoubleArgumentType.getDouble(ctx, "z"), null, null))
+                    .then(yaw);
+
+            var y = CommandManager.argument("y", DoubleArgumentType.doubleArg(-2048.0, 4096.0)).then(z);
+            var x = CommandManager.argument("x", DoubleArgumentType.doubleArg(-30_000_000.0, 30_000_000.0)).then(y);
+            dispatcher.register(CommandManager.literal("tpe").requires(source -> source.hasPermissionLevel(2)).then(x));
+
+            var fiven = CommandManager.literal("fiven")
                     .then(CommandManager.literal("shader")
                             .then(CommandManager.literal("clear")
                                     .requires(source -> source.hasPermissionLevel(2))
@@ -82,7 +83,8 @@ public final class FivenExtraContent implements ModInitializer {
                             .requires(source -> source.hasPermissionLevel(2))
                             .then(CommandManager.literal("slam").executes(ctx -> runLiftEvent(ctx.getSource(), "slam")))
                             .then(CommandManager.literal("screamer").executes(ctx -> runLiftEvent(ctx.getSource(), "screamer")))
-                            .then(CommandManager.literal("wrong-floor").executes(ctx -> runLiftEvent(ctx.getSource(), "wrong-floor")))));
+                            .then(CommandManager.literal("wrong-floor").executes(ctx -> runLiftEvent(ctx.getSource(), "wrong-floor"))));
+            dispatcher.register(fiven);
         });
     }
 
