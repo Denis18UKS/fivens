@@ -20,14 +20,14 @@ import ru.fifth.horror.cutscene.CutsceneManager;
 import ru.fifth.horror.item.VhsCassetteItem;
 import ru.fifth.horror.network.FifthNetworking;
 
-/** VHS drive: 1.5s physical insert -> verify -> TV playback OR malfunction -> 1.5s eject. */
+/** VHS drive: 1.5s physical insert -> short signal/static lock -> recorded TV playback OR malfunction -> eject. */
 public final class CassetteDriveBlockEntity extends BlockEntity {
     public static final int INSERT_TICKS = 30;
     public static final int FAIL_TICKS = 46;
     public static final int EJECT_TICKS = 30;
     private ItemStack cassette = ItemStack.EMPTY;
     private int timer;
-    private int phase; // 0 idle/loaded, 1 inserting, 2 malfunction, 3 ejecting
+    private int phase;
     private boolean reject;
     private BlockPos tvPos;
 
@@ -38,7 +38,6 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
     public int getPhase() { return phase; }
     public BlockPos getTvPos() { return tvPos; }
     public void linkTv(BlockPos p) { tvPos = p == null ? null : p.toImmutable(); markDirty(); sync(); }
-    /** Kept for old saves/UI; VHS is now always rendered on the linked world-TV surface. */
     public void setPlaybackMode(int ignored) { markDirty(); sync(); }
 
     public void insert(ItemStack stack) {
@@ -127,7 +126,10 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
             buf.writeBlockPos(tvPos);
             ServerPlayNetworking.send(p, FifthNetworking.VHS_PLAYBACK, buf);
         }
-        sw.playSound(null, pos, SoundEvents.BLOCK_NOTE_BLOCK_CHIME.value(), SoundCategory.BLOCKS, .7f, .7f);
+
+        // Startup interference belongs only to signal lock (~1.5 s) and now has an audible analogue hiss/click.
+        sw.playSound(null, tvPos, SoundEvents.BLOCK_FIRE_AMBIENT, SoundCategory.BLOCKS, .72f, .62f);
+        sw.playSound(null, tvPos, SoundEvents.BLOCK_NOTE_BLOCK_HAT.value(), SoundCategory.BLOCKS, .32f, .48f);
         markDirty();
         sync();
     }
