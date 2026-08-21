@@ -1,0 +1,30 @@
+{
+	"format_version": "1.8.0",
+	"animations": {
+		"animation_doors": {
+			"animation_length": 2.2917,
+			"bones": {
+				"right_door_lift": {
+					"scale": {
+						"0.0": {
+							"vector": [1, 1, 1]
+						},
+						"1.5": {
+							"vector": [0.2, 1, 1]
+						}
+					}
+				},
+				"left_door_lift": {
+					"scale": {
+						"0.0": {
+							"vector": [1, 1, 1]
+						},
+						"1.5": {
+							"vector": [0.2, 1, 1]
+						}
+					}
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "fiven",
+  "version": "${version}",
+  "name": "Пятый: Horror Director Toolkit",
+  "description": "Cinematic horror map toolkit: NPCs, scripts, cutscenes, paths, layers and automatic GeckoLib animation discovery.",
+  "authors": ["Denis18UKS"],
+  "environment": "*",
+  "entrypoints": {
+    "main": ["ru.fifth.horror.FifthMod"],
+    "client": ["ru.fifth.horror.client.FifthClient"]
+  },
+  "mixins": ["fifth.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "1.20.1",
+    "java": ">=17",
+    "fabric-api": "*",
+    "geckolib": ">=4.8.0"
+  }
+}

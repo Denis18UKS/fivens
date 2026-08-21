@@ -1,0 +1,8 @@
+{
+  "menu_ambient": {
+    "subtitle": "subtitles.fiven.menu_ambient",
+    "sounds": [
+      { "name": "fiven:music/menu_ambient", "stream": true }
+    ]
+  }
+}

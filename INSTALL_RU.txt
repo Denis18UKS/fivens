@@ -1,0 +1,20 @@
+ПЯТЫЙ: Horror Director Toolkit — Fabric 1.20.1
+
+Для запуска нужны:
+1) Minecraft 1.20.1
+2) Java 17
+3) Fabric Loader 0.15+
+4) Fabric API 0.92.6+1.20.1
+5) GeckoLib 4.8.4 для Fabric 1.20.1
+6) Fifth-Horror-Engine-0.1.0-alpha.jar
+
+Установка: положить Fabric API, GeckoLib и Fifth-Horror-Engine JAR в папку mods.
+
+Авторские инструменты:
+- F7 — режиссёрская студия
+- /fifth tools — получить инструменты редактора
+- /fifth reload-scripts — перечитать FifthScript
+- /fifth restore-defaults — восстановить слои, отмеченные как restore/default
+
+NPC по умолчанию НЕ имеют активного ИИ: без startAi() они работают как статуи.
+Новые GeckoLib-анимации в animations/*.json автоматически попадают в каталог после перезагрузки ресурсов.
