@@ -174,7 +174,9 @@ public final class LiftManager {
             }
 
             int floor = ride.toFloor;
-            BlockPos origin = lift.getStageOrigin();
+            // null is meaningful: restore at the floor snapshot's original captured origin.
+            // A relocated common stage is used only when the author explicitly enabled/configured it.
+            BlockPos origin = lift.getConfiguredStageOrigin();
             boolean restored = StructureLayerManager.activateFloor(server, world, lift.getLiftId(), floor, origin);
             lift.setCurrentFloor(floor);
             lift.setTargetFloor(floor);
@@ -193,8 +195,6 @@ public final class LiftManager {
                 player.sendMessage(Text.literal("§8[§cFiven§8] §7Лифт приехал на §c" + floor + "§7, но двери заблокированы."), true);
             }
 
-            // Paranormal arrival events are tied to a successful destination-layer switch.
-            // This is intentionally explicit, deterministic and never random.
             if (restored && lift.isCursed()) {
                 CursedLiftEventManager.onArrival(server, lift, floor, player);
             }
