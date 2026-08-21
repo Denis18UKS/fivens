@@ -20,10 +20,7 @@ import ru.fifth.horror.block.TelevisionBlockEntity;
 
 import java.util.Random;
 
-/**
- * Physical CRT overlay renderer. The same static render path is callable from the dispatcher mixin,
- * so TV playback does not depend solely on Fabric's BER registry being invoked in a particular client setup.
- */
+/** Physical CRT overlay renderer used by the normal BER and the dispatcher mixin. */
 public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionBlockEntity> {
     private static final float SCREEN_HALF = 7.0f / 16.0f;
     private static final int SCREEN_LIGHT = 0x00F000F0;
@@ -35,7 +32,6 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         renderScreen(be, delta, ms, vertices);
     }
 
-    /** Called both from the normal renderer and from TelevisionRenderDispatcherMixin. */
     public static void renderScreen(TelevisionBlockEntity be, float delta, MatrixStack ms, VertexConsumerProvider vertices) {
         if (be == null || VhsWorldCapture.isCapturing()) return;
         VhsPlayback.Session session = VhsPlayback.session(be.getPos());
@@ -48,10 +44,9 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         ms.push();
         orientToPhysicalFront(ms, facing);
 
-        boolean noise = session != null ? session.staticPhase() : be.getStaticTicks() > 0;
+        boolean startupStatic = session != null ? session.staticPhase() : be.getStaticTicks() > 0;
         Identifier captured = session == null ? null : VhsWorldCapture.texture(be.getPos());
-
-        if (!noise && captured != null) drawVideoQuad(ms, vertices, captured, SCREEN_LIGHT);
+        if (!startupStatic && captured != null) drawVideoQuad(ms, vertices, captured, SCREEN_LIGHT);
 
         float overlayScale = (SCREEN_HALF * 2.0f) / 108.0f;
         ms.scale(overlayScale, -overlayScale, overlayScale);
@@ -59,7 +54,7 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         int x = -54;
         int y = -43;
 
-        if (noise) {
+        if (startupStatic) {
             drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
             long seed = (be.getWorld() == null ? 0 : be.getWorld().getTime()) * 31L + be.getPos().asLong();
             Random r = new Random(seed);
@@ -72,24 +67,16 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
                 text.draw(line.toString(), x, y + 4 + row * 7, grey, false, matrix, vertices,
                         TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             }
-            text.draw("NO SIGNAL", -27, -4, 0xFFF0F0F0, false, matrix, vertices,
+            text.draw("VHS TRACKING...", -39, -4, 0xFFF0F0F0, false, matrix, vertices,
                     TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
         } else if (session != null) {
             if (captured == null) {
+                // Never fake the recording with more static. Static belongs only to cassette startup.
+                // This text normally appears for at most the first capture frame; persistent appearance means the
+                // secondary-camera renderer logged a real error to latest.log under [Fiven/VHS].
                 drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
-                VhsPlayback.Sample s = session.sample();
-                float p = session.progress();
-                for (int row = 0; row < 11; row++) {
-                    StringBuilder line = new StringBuilder();
-                    for (int col = 0; col < 18; col++) {
-                        double wave = Math.sin((col * .72) + (row * .41) + (p * 22) + (s.yaw() * .025) + s.x() * .03 + s.z() * .02);
-                        line.append(wave > .55 ? '▓' : wave > 0 ? '▒' : wave > -.55 ? '░' : ' ');
-                    }
-                    int g = Math.max(70, Math.min(225, (int) (135 + Math.sin(row + p * 17) * 65)));
-                    int color = 0xFF000000 | (g << 16) | (g << 8) | g;
-                    text.draw(line.toString(), x, y + 4 + row * 7, color, false, matrix, vertices,
-                            TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
-                }
+                text.draw("VIDEO BUFFERING", -39, -4, 0xFFE6E6E6, false, matrix, vertices,
+                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             } else {
                 for (int row = 0; row < 12; row += 2) {
                     text.draw("──────────────────", x, y + 4 + row * 7, 0x55000000, false, matrix, vertices,
@@ -113,10 +100,6 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         ms.pop();
     }
 
-    /**
-     * FACING is the direction the TV front looks toward. Using explicit transforms avoids model-JSON rotation sign
-     * ambiguities and keeps the VHS quad glued to the physical front on all four horizontal facings.
-     */
     private static void orientToPhysicalFront(MatrixStack ms, Direction facing) {
         switch (facing) {
             case SOUTH -> {
@@ -148,13 +131,10 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         Matrix4f m = ms.peek().getPositionMatrix();
         Matrix3f n = ms.peek().getNormalMatrix();
         float left = -SCREEN_HALF, right = SCREEN_HALF, top = SCREEN_HALF, bottom = -SCREEN_HALF;
-
-        // Front-facing winding.
         vertex(vc, m, n, left, top, 0, 0, light, -1);
         vertex(vc, m, n, right, top, 1, 0, light, -1);
         vertex(vc, m, n, right, bottom, 1, 1, light, -1);
         vertex(vc, m, n, left, bottom, 0, 1, light, -1);
-        // Back winding too: some shader/render-layer combinations enable culling unexpectedly.
         vertex(vc, m, n, left, bottom, 0, 1, light, 1);
         vertex(vc, m, n, right, bottom, 1, 1, light, 1);
         vertex(vc, m, n, right, top, 1, 0, light, 1);
