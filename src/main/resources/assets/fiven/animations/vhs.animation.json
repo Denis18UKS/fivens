@@ -1,0 +1,13 @@
+{
+  "format_version": "1.8.0",
+  "animations": {
+    "videocaseta": {
+      "animation_length": 1.5,
+      "bones": {"caseta":{"rotation":{"0.0":{"post":{"vector":[0,0,0]},"lerp_mode":"catmullrom"},"1.25":{"post":{"vector":[0,0,0]},"lerp_mode":"catmullrom"}},"position":{"0.0":{"post":{"vector":[0,0,-15]},"lerp_mode":"catmullrom"},"1.25":{"post":{"vector":[0,0,0]},"lerp_mode":"catmullrom"}}}}
+    },
+    "videocaseta_output": {
+      "animation_length": 1.5,
+      "bones": {"caseta":{"rotation":{"0.0":{"post":{"vector":[0,0,0]},"lerp_mode":"catmullrom"},"1.25":{"post":{"vector":[0,0,0]},"lerp_mode":"catmullrom"}},"position":{"0.0":{"post":{"vector":[0,0,0]},"lerp_mode":"catmullrom"},"1.25":{"post":{"vector":[0,0,-15]},"lerp_mode":"catmullrom"}}}}
+    }
+  }
+}
