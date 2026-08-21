@@ -33,5 +33,6 @@
   "entity.fiven.lift_panel": "Панель лифта",
   "item.fiven.cutscene_library_tool": "Библиотека катсцен",
   "block.fiven.clock_arms": "Стрелки часов",
-  "item.fiven.clock_arms": "Стрелки часов"
+  "item.fiven.clock_arms": "Стрелки часов",
+  "item.fiven.mfl_hiding_tool": "Зоны укрытия от MFL"
 }
