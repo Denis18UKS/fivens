@@ -17,11 +17,11 @@ import ru.fifth.horror.entity.MonsterForLiftEntity;
  * - manual walking/run animation previews now move the MFL physically using Minecraft navigation;
  * - explicit chase-test mode drives the nearest MFL toward a selected player while preserving the authored AI state.
  */
-@Mixin(MonsterForLiftEntity.class)
+@Mixin(value = MonsterForLiftEntity.class, remap = false)
 public abstract class MonsterForLiftRuntimeMixin {
     @Unique private Vec3d fiven$manualLocomotionTarget;
 
-    @Inject(method = "tick", at = @At("TAIL"))
+    @Inject(method = "tick", at = @At("TAIL"), remap = false)
     private void fiven$runtimeLocomotion(CallbackInfo ci) {
         MonsterForLiftEntity mfl = (MonsterForLiftEntity) (Object) this;
         if (mfl.getWorld().isClient || !(mfl.getWorld() instanceof ServerWorld world)) return;
