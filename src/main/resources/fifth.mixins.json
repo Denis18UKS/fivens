@@ -9,6 +9,7 @@
     "CameraMixin",
     "InGameHudMixin",
     "GameRendererMixin",
+    "GameRendererAccessor",
     "ScreenThemeMixin",
     "ClickableWidgetThemeMixin",
     "TextFieldThemeMixin",
