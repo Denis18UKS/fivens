@@ -20,7 +20,7 @@ public class BuildLayerScreen extends HorrorScreen {
         this.b=stack.hasNbt()&&stack.getNbt().contains("FifthPosB")?BlockPos.fromLong(stack.getNbt().getLong("FifthPosB")):null;}
     @Override protected void init(){
         beginHorrorInit();int w=contentWidth(480),x=(width-w)/2,top=safeTop();int h=20,gap=6;
-        build=horrorField(x,top,w,h,"lift_stage",128);variant=horrorField(x,top+29,w,h,"floor_1",128);group=horrorField(x,top+58,(int)(w*.70),h,"lift_floors",128);
+        build=horrorField(x,top,w,h,"lift",128);variant=horrorField(x,top+29,w,h,"floor_1",128);group=horrorField(x,top+58,(int)(w*.70),h,"lift_floors",128);
         floor=horrorField(x+(int)(w*.70)+gap,top+58,w-(int)(w*.70)-gap,h,"1",2);
         int half=(w-gap)/2,bh=21;
         addDrawableChild(HorrorButton.builder(Text.literal("По умолчанию: ДА"),q->{defaultActive=!defaultActive;q.setMessage(Text.literal("По умолчанию: "+(defaultActive?"ДА":"НЕТ")));}).dimensions(x,top+88,half,bh).build());
@@ -32,10 +32,10 @@ public class BuildLayerScreen extends HorrorScreen {
     private int floorValue(){try{return Math.max(0,Math.min(9,Integer.parseInt(floor.getText().trim())));}catch(Exception e){return 0;}}
     private void capture(){
         if(a==null||b==null){status="Сначала выбери A и B: клик по блоку = A, Shift+клик = B.";return;}if(client==null||client.getNetworkHandler()==null){status="Слои сохраняются только внутри мира.";return;}
-        PacketByteBuf out=PacketByteBufs.create();out.writeString(build.getText(),128);out.writeString(variant.getText(),128);out.writeString(group.getText(),128);out.writeBoolean(defaultActive);out.writeBoolean(restore);out.writeVarInt(floorValue());out.writeBlockPos(a);out.writeBlockPos(b);ClientPlayNetworking.send(FifthNetworking.STRUCTURE_CAPTURE,out);status=floorValue()>0?"Этаж "+floorValue()+" отправлен на сохранение.":"Обычный слой отправлен на сохранение.";
+        PacketByteBuf out=PacketByteBufs.create();out.writeString(build.getText(),128);out.writeString(variant.getText(),128);out.writeString(group.getText(),128);out.writeBoolean(defaultActive);out.writeBoolean(restore);out.writeVarInt(floorValue());out.writeBlockPos(a);out.writeBlockPos(b);ClientPlayNetworking.send(FifthNetworking.STRUCTURE_CAPTURE,out);status=floorValue()>0?"Этаж "+floorValue()+" для лифта/набора «"+build.getText()+"» отправлен на сохранение.":"Обычный слой отправлен на сохранение.";
     }
     private void activate(){if(client==null||client.getNetworkHandler()==null){status="Активация доступна только внутри мира.";return;}PacketByteBuf out=PacketByteBufs.create();out.writeString(build.getText(),128);out.writeString(variant.getText(),128);ClientPlayNetworking.send(FifthNetworking.STRUCTURE_ACTIVATE,out);status="Запрошена замена слоя.";}
     @Override public void render(DrawContext c,int mx,int my,float d){horrorBackground(c);int w=contentWidth(480),x=(width-w)/2,top=safeTop();
-        c.drawTextWithShadow(textRenderer,"Постройка",x,top-10,0xFFAD9D95);c.drawTextWithShadow(textRenderer,"Вариант / слой",x,top+19,0xFF9F918B);c.drawTextWithShadow(textRenderer,"Группа замены",x,top+48,0xFF9F918B);c.drawTextWithShadow(textRenderer,"Этаж 0=не этаж",x+(int)(w*.70)+6,top+48,0xFFB74848);
+        c.drawTextWithShadow(textRenderer,"ID лифта / набора этажей",x,top-10,0xFFAD9D95);c.drawTextWithShadow(textRenderer,"Вариант / слой",x,top+19,0xFF9F918B);c.drawTextWithShadow(textRenderer,"Группа замены",x,top+48,0xFF9F918B);c.drawTextWithShadow(textRenderer,"Этаж 0=не этаж",x+(int)(w*.70)+6,top+48,0xFFB74848);
         String apos=a==null?"не выбрана":a.toShortString(),bpos=b==null?"не выбрана":b.toShortString();int infoY=Math.min(height-33,top+207);c.drawCenteredTextWithShadow(textRenderer,"A: "+apos+"    B: "+bpos,width/2,infoY,0xFFB7A49B);if(!status.isBlank())c.drawCenteredTextWithShadow(textRenderer,status,width/2,Math.min(height-18,infoY+14),0xFFD5A9A2);super.render(c,mx,my,d);}
 }
