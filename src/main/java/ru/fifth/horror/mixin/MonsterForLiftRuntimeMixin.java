@@ -12,15 +12,16 @@ import ru.fifth.horror.entity.MflHidingManager;
 import ru.fifth.horror.entity.MflTestModeManager;
 import ru.fifth.horror.entity.MonsterForLiftEntity;
 
+import java.util.UUID;
+
 /**
- * Runtime locomotion bridge:
- * - manual walking/run animation previews move the MFL physically using Minecraft navigation;
- * - explicit chase-test mode drives the nearest MFL toward a selected player while preserving authored AI state.
+ * Runtime locomotion / hunt bridge implemented as a mixin:
+ * - manual walking/run previews physically navigate forward;
+ * - chase-test follows the selected player and performs a real screamer on catch;
+ * - authored LOGICAL+Hunt forcibly uses the full run animation while the player is visible;
+ * - when authored Hunt reaches the player it invokes the entity's normal catch path: mfl_screamer + screen screamer.
  *
- * IMPORTANT: tick() is an overridden Minecraft method and is remapped by Loom in the production jar.
- * Therefore this mixin MUST use the normal refmap remapping for the tick injection. Using remap=false here
- * compiles in dev but crashes a real Fabric client because runtime MonsterForLiftEntity contains method_5773,
- * not the named development method "tick".
+ * tick() is a Minecraft override, so the injection deliberately uses normal Loom/refmap remapping.
  */
 @Mixin(MonsterForLiftEntity.class)
 public abstract class MonsterForLiftRuntimeMixin {
@@ -39,6 +40,13 @@ public abstract class MonsterForLiftRuntimeMixin {
             return;
         }
 
+        // Reinforce the authored Hunt state after the entity's own logical AI tick.
+        // This prevents any other animation/controller from replacing RUN while MFL can actually see its target.
+        if (tickAuthoredHunt(mfl, access, world)) {
+            fiven$manualLocomotionTarget = null;
+            return;
+        }
+
         int manualTicks = access.fiven$getManualAnimationTicks();
         String animation = mfl.getCurrentAnimation();
         boolean walking = "walking".equals(animation) || "walk".equals(animation);
@@ -50,6 +58,30 @@ public abstract class MonsterForLiftRuntimeMixin {
         } else {
             fiven$manualLocomotionTarget = null;
         }
+    }
+
+    /** Returns true only while an authored Hunt target is currently visible/being caught. */
+    @Unique
+    private boolean tickAuthoredHunt(MonsterForLiftEntity mfl, MonsterForLiftRuntimeAccess access, ServerWorld world) {
+        if (mfl.getAiMode() != MonsterForLiftEntity.AiMode.LOGICAL || !mfl.isHuntEnabled()) return false;
+        if (access.fiven$getManualAnimationTicks() > 0 && "mfl_screamer".equals(mfl.getCurrentAnimation())) return true;
+
+        UUID targetId = access.fiven$getChaseTarget();
+        if (targetId == null) return false;
+        ServerPlayerEntity target = findPlayer(world, targetId);
+        if (target == null || !target.isAlive() || target.isCreative() || target.isSpectator()) return false;
+        if (MflHidingManager.isHidden(target) || !access.fiven$canSeeTarget(target)) return false;
+
+        // Same catch distance as the authored entity logic. Invoke the real catch method so it also clears chase,
+        // starts mfl_screamer and sends the actual screamer packet rather than only changing the animation string.
+        if (mfl.squaredDistanceTo(target) <= 1.55 * 1.55) {
+            access.fiven$catchPlayer(target);
+            return true;
+        }
+
+        mfl.getNavigation().startMovingTo(target, mfl.getRunSpeed());
+        access.fiven$setCurrentAnimation("run");
+        return true;
     }
 
     @Unique
@@ -74,24 +106,17 @@ public abstract class MonsterForLiftRuntimeMixin {
     @Unique
     private void tickTestChase(MonsterForLiftEntity mfl, MonsterForLiftRuntimeAccess access,
                                ServerWorld world, MflTestModeManager.State test) {
-        // Let a manually triggered screamer finish without the chase controller immediately overriding it.
+        // Let a screamer finish without the chase controller overriding the screamer animation.
         if (access.fiven$getManualAnimationTicks() > 0 && "mfl_screamer".equals(mfl.getCurrentAnimation())) return;
 
-        ServerPlayerEntity target = null;
-        for (ServerPlayerEntity player : world.getPlayers()) {
-            if (player.getUuid().equals(test.targetUuid)) {
-                target = player;
-                break;
-            }
-        }
-
+        ServerPlayerEntity target = findPlayer(world, test.targetUuid);
         if (target == null || !target.isAlive() || target.isSpectator()) {
             mfl.getNavigation().stop();
             access.fiven$setCurrentAnimation("idle");
             return;
         }
 
-        // Keep original tick() in its manual branch on the next tick, so authored OFF mode cannot stop our test path.
+        // Keep the original entity tick in its manual branch on the next tick so authored OFF mode cannot stop test navigation.
         access.fiven$setManualAnimationTicks(2);
 
         boolean hidden = MflHidingManager.isHidden(target);
@@ -99,6 +124,13 @@ public abstract class MonsterForLiftRuntimeMixin {
         if (visible) {
             test.lastKnown = target.getPos();
             test.searchTicks = mfl.getSearchDurationTicks();
+
+            if (mfl.squaredDistanceTo(target) <= 1.55 * 1.55) {
+                // Test mode intentionally supports Creative directors too, so use the explicit screamer method here.
+                mfl.triggerScreamer(target);
+                return;
+            }
+
             mfl.getNavigation().startMovingTo(target, mfl.getRunSpeed());
             access.fiven$setCurrentAnimation("run");
             return;
@@ -114,5 +146,14 @@ public abstract class MonsterForLiftRuntimeMixin {
 
         mfl.getNavigation().stop();
         access.fiven$setCurrentAnimation("idle");
+    }
+
+    @Unique
+    private static ServerPlayerEntity findPlayer(ServerWorld world, UUID uuid) {
+        if (uuid == null) return null;
+        for (ServerPlayerEntity player : world.getPlayers()) {
+            if (uuid.equals(player.getUuid())) return player;
+        }
+        return null;
     }
 }
