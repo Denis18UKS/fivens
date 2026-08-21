@@ -11,11 +11,11 @@ import java.util.Map;
 
 /**
  * Client-side timeline cache for VHS sessions attached to physical televisions.
- * VHS never hijacks the player's fullscreen renderer; TelevisionRenderer samples this timeline and VhsWorldCapture
- * renders the recorded camera into a small off-screen framebuffer.
+ * Startup static is deliberately short: it represents the cassette/TV locking onto the signal, not the recording.
  */
 public final class VhsPlayback {
-    public static final int STATIC_TICKS = 80;
+    /** 1.5 seconds, matching the supplied cassette insertion animation. */
+    public static final int STATIC_TICKS = 30;
     private static final Map<Long, Session> TV = new HashMap<>();
     private VhsPlayback() {}
 
@@ -37,13 +37,11 @@ public final class VhsPlayback {
         }
     }
 
-    /** Kept for the HUD callback. Deliberately draws nothing: VHS belongs to the TV surface. */
+    /** VHS belongs to the physical TV surface; this intentionally never draws fullscreen. */
     public static void render(DrawContext ignored) {}
 
     public static Session session(BlockPos pos) { return pos == null ? null : TV.get(pos.asLong()); }
     public static Session session(long pos) { return TV.get(pos); }
-
-    /** Stable snapshot so the off-screen renderer can iterate while sessions may expire on the next client tick. */
     public static List<Long> activePositions() { return new ArrayList<>(TV.keySet()); }
 
     private static CutsceneDefinition copy(CutsceneDefinition scene) {
@@ -73,7 +71,7 @@ public final class VhsPlayback {
             this.total = Math.max(1, t);
         }
 
-        private boolean tick() { ticks++; return ticks < STATIC_TICKS + total + 40; }
+        private boolean tick() { ticks++; return ticks < STATIC_TICKS + total + 10; }
         public int ticks() { return ticks; }
         public boolean staticPhase() { return ticks < STATIC_TICKS; }
         public boolean recordingPhase() { return ticks >= STATIC_TICKS && ticks < STATIC_TICKS + total; }
