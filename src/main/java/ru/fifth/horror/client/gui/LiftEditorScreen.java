@@ -35,7 +35,7 @@ public final class LiftEditorScreen extends HorrorScreen {
     protected void init() {
         beginHorrorInit();
         int w = contentWidth(540), x = (width - w) / 2, y = safeTop(), gap = 6, bh = 20;
-        boolean compact = height < 300 || w < 380;
+        boolean compact = height < 330 || w < 380;
         int idW = Math.max(120, (int)(w * .66));
         idField = horrorField(x, y, idW, bh, initialLiftId, 64);
         addDrawableChild(HorrorButton.builder(Text.literal("Этаж: " + floor), b -> {
@@ -71,13 +71,28 @@ public final class LiftEditorScreen extends HorrorScreen {
             }
         }).dimensions(x, yy, w, bh).build());
         yy += 26;
+
         int half = (w - gap) / 2;
+        addDrawableChild(HorrorButton.builder(Text.literal("Тип: ОБЫЧНЫЙ"), b -> setCurse(false))
+                .dimensions(x, yy, half, bh).build());
+        addDrawableChild(HorrorButton.builder(Text.literal("Тип: ПРОКЛЯТЫЙ"), b -> setCurse(true))
+                .dimensions(x + half + gap, yy, w - half - gap, bh).build());
+        yy += 26;
+
         addDrawableChild(HorrorButton.builder(Text.literal("Сохранить"), b -> save()).dimensions(x, yy, half, bh).build());
         addDrawableChild(HorrorButton.builder(Text.literal("Назад"), b -> client.setScreen(parent)).dimensions(x + half + gap, yy, w - half - gap, bh).build());
     }
 
     private Text doorText(int f) {
         return Text.literal("Этаж " + f + ": " + (((openMask >> (f - 1)) & 1) != 0 ? "двери ОТКР." : "двери ЗАКР."));
+    }
+
+    private void setCurse(boolean cursed) {
+        PacketByteBuf out = PacketByteBufs.create();
+        out.writeBlockPos(liftPos);
+        out.writeBoolean(cursed);
+        ClientPlayNetworking.send(FifthNetworking.LIFT_CURSE_CONFIG, out);
+        status = cursed ? "Лифт помечен как ПРОКЛЯТЫЙ" : "Лифт помечен как ОБЫЧНЫЙ";
     }
 
     private void save() {
