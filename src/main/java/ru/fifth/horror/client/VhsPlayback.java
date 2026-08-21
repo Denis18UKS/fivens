@@ -66,12 +66,13 @@ public final class VhsPlayback {
             int local=Math.max(0,ticks-STATIC_TICKS),acc=0;
             for(int i=0;i<scene.keyframes.size();i++){
                 var a=scene.keyframes.get(i);int dur=Math.max(1,a.durationTicks);
-                if(local<acc+dur){var b=i+1<scene.keyframes.size()?scene.keyframes.get(i+1):a;float q=Math.max(0,Math.min(1,(local-acc)/(float)dur));return new Sample(lerp(a.x,b.x,q),lerp(a.y,b.y,q),lerp(a.z,b.z,q),lerpAngle(a.yaw,b.yaw,q),lerp(a.pitch,b.pitch,q),lerp(a.fov,b.fov,q));}
+                if(local<acc+dur){var b=i+1<scene.keyframes.size()?scene.keyframes.get(i+1):a;float q=Math.max(0,Math.min(1,(local-acc)/(float)dur));return new Sample(lerp(a.x,b.x,q),lerp(a.y,b.y,q),lerp(a.z,b.z,q),lerpAngle(a.yaw,b.yaw,q),lerpFloat(a.pitch,b.pitch,q),lerp(a.fov,b.fov,q));}
                 acc+=dur;
             }
             var k=scene.keyframes.get(scene.keyframes.size()-1);return new Sample(k.x,k.y,k.z,k.yaw,k.pitch,k.fov);
         }
         private static double lerp(double a,double b,float q){return a+(b-a)*q;}
+        private static float lerpFloat(float a,float b,float q){return a+(b-a)*q;}
         private static float lerpAngle(float a,float b,float q){float d=(b-a)%360f;if(d>180)d-=360;if(d<-180)d+=360;return a+d*q;}
     }
 
