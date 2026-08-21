@@ -2,16 +2,20 @@ package ru.fifth.horror.item;
 
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.Item;
-import net.minecraft.item.ItemUsageContext;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.ItemUsageContext;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.ActionResult;
 import net.minecraft.util.math.BlockPos;
 import ru.fifth.horror.FifthMod;
 import ru.fifth.horror.entity.DirectorNpcEntity;
+import ru.fifth.horror.script.FifthScriptEngine;
 
 public class NpcSpawnEggItem extends Item {
-    public NpcSpawnEggItem(Settings settings) { super(settings); }
+    public NpcSpawnEggItem(Settings settings) {
+        super(settings);
+    }
+
     @Override
     public ActionResult useOnBlock(ItemUsageContext context) {
         if (!(context.getWorld() instanceof ServerWorld world)) return ActionResult.SUCCESS;
@@ -20,10 +24,14 @@ public class NpcSpawnEggItem extends Item {
         ItemStack stack = context.getStack();
         DirectorNpcEntity npc = FifthMod.DIRECTOR_NPC.create(world);
         if (npc == null) return ActionResult.FAIL;
+
         BlockPos pos = context.getBlockPos().offset(context.getSide());
         npc.refreshPositionAndAngles(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, player.getYaw(), 0);
-        if (stack.hasNbt() && stack.getNbt().contains("FifthNpcTemplate")) npc.applyTemplateJson(stack.getNbt().getString("FifthNpcTemplate"));
-        world.spawnEntity(npc);
+        if (stack.hasNbt() && stack.getNbt().contains("FifthNpcTemplate")) {
+            npc.applyTemplateJson(stack.getNbt().getString("FifthNpcTemplate"));
+        }
+        if (!world.spawnEntity(npc)) return ActionResult.FAIL;
+        FifthScriptEngine.indexNpc(npc);
         if (!player.getAbilities().creativeMode) stack.decrement(1);
         return ActionResult.CONSUME;
     }
