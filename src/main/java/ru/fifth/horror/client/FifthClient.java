@@ -48,6 +48,7 @@ public final class FifthClient implements ClientModInitializer {
         ClientPlayNetworking.registerGlobalReceiver(FifthNetworking.NPC_LIBRARY_PAYLOAD,(client,handler,buf,sender)->{int count=Math.min(2048,buf.readVarInt());java.util.List<ScriptComputerScreen.NpcInfo> rows=new java.util.ArrayList<>(count);for(int i=0;i<count;i++)rows.add(new ScriptComputerScreen.NpcInfo(buf.readUuid(),buf.readString(128),buf.readString(256),buf.readBoolean(),buf.readString(512),buf.readVarInt(),buf.readString(256)));client.execute(()->{if(client.currentScreen instanceof ScriptComputerScreen screen)screen.updateNpcLibrary(rows);});});
         ClientPlayNetworking.registerGlobalReceiver(FifthNetworking.SCREAMER,(client,handler,buf,sender)->{int ticks=buf.readVarInt();float intensity=buf.readFloat();client.execute(()->{ScreamerOverlay.start(ticks,intensity);if(client.player!=null)client.player.playSound(SoundEvents.ENTITY_ENDERMAN_SCREAM,1.0f,.55f);});});
 
+        // Direct target click remains the fastest workflow for entity editors.
         UseEntityCallback.EVENT.register((player,world,hand,entity,hit)->{
             if(world.isClient&&CutscenePlayback.lockInput())return net.minecraft.util.ActionResult.PASS;
             if(world.isClient&&player.getStackInHand(hand).isOf(FifthMod.NPC_EDITOR_TOOL)&&entity instanceof ru.fifth.horror.entity.DirectorNpcEntity npc){MinecraftClient.getInstance().setScreen(new NpcEditorScreen(MinecraftClient.getInstance().currentScreen,npc));return net.minecraft.util.ActionResult.SUCCESS;}
@@ -55,14 +56,35 @@ public final class FifthClient implements ClientModInitializer {
             if(world.isClient&&player.getStackInHand(hand).isOf(FifthMod.ANIMATION_CONDITION_TOOL)){MinecraftClient.getInstance().setScreen(new AnimationConditionScreen(MinecraftClient.getInstance().currentScreen,entity));return net.minecraft.util.ActionResult.SUCCESS;}
             return net.minecraft.util.ActionResult.PASS;
         });
+
+        // Every item whose primary purpose is a GUI now opens a GUI on RMB while held.
+        // Target-dependent tools open a searchable selector if no specific target was clicked.
         UseItemCallback.EVENT.register((player,world,hand)->{
-            if(!world.isClient)return TypedActionResult.pass(player.getStackInHand(hand));var stack=player.getStackInHand(hand);if(CutscenePlayback.lockInput())return TypedActionResult.pass(stack);MinecraftClient client=MinecraftClient.getInstance();
+            if(!world.isClient)return TypedActionResult.pass(player.getStackInHand(hand));
+            var stack=player.getStackInHand(hand);
+            if(CutscenePlayback.lockInput())return TypedActionResult.pass(stack);
+            MinecraftClient client=MinecraftClient.getInstance();
+
             if(stack.isOf(FifthMod.NPC_CREATOR)){client.setScreen(new NpcCreatorScreen(client.currentScreen,-1,null));return TypedActionResult.success(stack);}
             if(stack.isOf(FifthMod.CAMERA_TOOL)){client.setScreen(new CameraEditorScreen(client.currentScreen));return TypedActionResult.success(stack);}
             if(stack.isOf(FifthMod.BUILD_LAYER_TOOL)){client.setScreen(new BuildLayerScreen(client.currentScreen,stack.copy()));return TypedActionResult.success(stack);}
             if(stack.isOf(FifthMod.ENTITY_SHADER_TOOL)){client.setScreen(new EntityShaderScreen(client.currentScreen));return TypedActionResult.success(stack);}
             if(stack.isOf(FifthMod.CUTSCENE_LIBRARY_TOOL)){client.setScreen(new CutsceneLibraryScreen(client.currentScreen));return TypedActionResult.success(stack);}
-            if(stack.isOf(FifthMod.TV_LINK_TOOL)&&stack.getNbt()!=null&&stack.getNbt().contains("FivenTvPos")){var pos=net.minecraft.util.math.BlockPos.fromLong(stack.getNbt().getLong("FivenTvPos"));if(client.world!=null&&client.world.getBlockEntity(pos) instanceof ru.fifth.horror.block.TelevisionBlockEntity tv){client.setScreen(new TvSettingsScreen(client.currentScreen,pos,tv.getQuality(),tv.getNoise(),tv.isMonochrome()));return TypedActionResult.success(stack);}}
+
+            if(stack.isOf(FifthMod.NPC_EDITOR_TOOL)){client.setScreen(new ToolTargetScreen(client.currentScreen,ToolTargetScreen.Mode.NPC));return TypedActionResult.success(stack);}
+            if(stack.isOf(FifthMod.MFL_EDITOR_TOOL)){client.setScreen(new ToolTargetScreen(client.currentScreen,ToolTargetScreen.Mode.MFL));return TypedActionResult.success(stack);}
+            if(stack.isOf(FifthMod.ANIMATION_CONDITION_TOOL)){client.setScreen(new ToolTargetScreen(client.currentScreen,ToolTargetScreen.Mode.ANIMATION_CONDITION));return TypedActionResult.success(stack);}
+            if(stack.isOf(FifthMod.LIFT_EDITOR_TOOL)){client.setScreen(new ToolTargetScreen(client.currentScreen,ToolTargetScreen.Mode.LIFT));return TypedActionResult.success(stack);}
+            if(stack.isOf(FifthMod.LIFT_PANEL_TOOL)){client.setScreen(new ToolTargetScreen(client.currentScreen,ToolTargetScreen.Mode.LIFT_PANEL));return TypedActionResult.success(stack);}
+
+            if(stack.isOf(FifthMod.TV_LINK_TOOL)){
+                if(stack.getNbt()!=null&&stack.getNbt().contains("FivenTvPos")){
+                    var pos=net.minecraft.util.math.BlockPos.fromLong(stack.getNbt().getLong("FivenTvPos"));
+                    if(client.world!=null&&client.world.getBlockEntity(pos) instanceof ru.fifth.horror.block.TelevisionBlockEntity tv){client.setScreen(new TvSettingsScreen(client.currentScreen,pos,tv.getQuality(),tv.getNoise(),tv.isMonochrome()));return TypedActionResult.success(stack);}
+                }
+                client.setScreen(new ToolTargetScreen(client.currentScreen,ToolTargetScreen.Mode.TV));
+                return TypedActionResult.success(stack);
+            }
             return TypedActionResult.pass(stack);
         });
 
@@ -73,29 +95,29 @@ public final class FifthClient implements ClientModInitializer {
     }
 
     private static String description(String id){return switch(id){
-        case "lift"->"Физический блок кабины лифта.\nShift+ПКМ: сведения; Lift Editor: этажи и область слоёв.";
+        case "lift"->"Физический блок кабины лифта.\nLift Editor открывает этажи и область слоёв.";
         case "lift_panel"->"Настенная панель этажей 1–9.\nСвяжи её с лифтом через Lift Panel Tool.";
         case "lift_button_binder"->"Привязка обычной каменной кнопки к лифту.\nПКМ по лифту → выбери этаж → ПКМ по Stone Button.";
-        case "lift_panel_tool"->"Связывает панель этажей с выбранным блоком лифта.";
-        case "lift_editor_tool"->"Открывает настройки ID, этажей, дверей и области слоёв лифта.";
+        case "lift_panel_tool"->"Связывает панель этажей с выбранным блоком лифта.\nПКМ в воздухе открывает список панелей.";
+        case "lift_editor_tool"->"Редактор ID, этажей, дверей и области слоёв.\nПКМ в воздухе открывает список ближайших лифтов.";
         case "vhs_cassette"->"VHS-кассета. Может хранить ID записи катсцены.";
         case "television"->"Телевизор Fiven для воспроизведения VHS-записей.";
         case "cassette_drive"->"Кассетовод. ПКМ кассетой — вставить; Shift+ПКМ — извлечь.";
-        case "tv_link_tool"->"Связывает телевизор и кассетовод и открывает настройки VHS.";
-        case "camera_tool"->"Режиссёрская камера: ключевые кадры, запись и получение кассеты.";
-        case "cutscene_library_tool"->"Библиотека сохранённых катсцен, предпросмотр и VHS.";
-        case "animation_condition_tool"->"Условия анимаций и скримеров, включая текущую анимацию сущности.";
-        case "entity_shader_tool"->"Привязывает world-space хоррор-эффекты к выбранным сущностям.";
+        case "tv_link_tool"->"Связывает телевизор и кассетовод.\nПКМ открывает настройки или список телевизоров.";
+        case "camera_tool"->"Режиссёрская камера: ключевые кадры, запись и получение кассеты.\nПКМ открывает редактор.";
+        case "cutscene_library_tool"->"Библиотека сохранённых катсцен, предпросмотр и VHS.\nПКМ открывает библиотеку.";
+        case "animation_condition_tool"->"Условия анимаций и скримеров.\nПКМ открывает выбор сущности.";
+        case "entity_shader_tool"->"Привязывает world-space хоррор-эффекты к сущностям.\nПКМ открывает редактор.";
         case "mfl_spawn_egg"->"Яйцо monster_for_lift (MFL).";
-        case "mfl_editor_tool"->"Настройки MFL, маршрута и его личных анимаций.";
+        case "mfl_editor_tool"->"Настройки MFL, маршрута и личных анимаций.\nПКМ открывает выбор MFL.";
         case "mfl_path_tool"->"Прокладывает маршрут выбранного MFL по точкам.";
-        case "npc_creator"->"Создаёт шаблон нового режиссёрского NPC.";
+        case "npc_creator"->"Создаёт шаблон нового режиссёрского NPC.\nПКМ открывает редактор создания.";
         case "npc_spawn_egg"->"Спавнит NPC из сохранённого шаблона.";
-        case "npc_editor_tool"->"Основной визуальный редактор NPC без обязательного скриптинга.";
+        case "npc_editor_tool"->"Визуальный редактор NPC.\nПКМ открывает выбор ближайшего NPC.";
         case "npc_path_tool"->"Создаёт и редактирует маршрут выбранного NPC.";
         case "npc_state_tool"->"Переключает состояние/активность NPC.";
         case "npc_link_tool"->"Связывает NPC со сценарным компьютером.";
-        case "build_layer_tool"->"Сохраняет слои постройки и помечает их этажами лифта.";
+        case "build_layer_tool"->"Сохраняет слои постройки и помечает их этажами лифта.\nПКМ открывает редактор слоёв.";
         case "script_computer"->"Сценарный компьютер для расширенной логики карты.";
         default->"Инструмент/блок внутреннего движка Fiven.\nИспользуется при создании карты «Пятый».";};}
 }
