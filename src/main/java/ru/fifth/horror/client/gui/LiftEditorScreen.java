@@ -76,13 +76,13 @@ public final class LiftEditorScreen extends HorrorScreen {
         addDrawableChild(HorrorButton.builder(Text.literal("Общая область: min-угол = позиция игрока"), b -> {
             if (client != null && client.player != null) {
                 BlockPos p = client.player.getBlockPos();
+                stage = p;
                 xField.setText(Integer.toString(p.getX()));
                 yField.setText(Integer.toString(p.getY()));
                 zField.setText(Integer.toString(p.getZ()));
                 relocateStage = true;
                 setStageFieldsActive(true);
-                status = "Общий min-угол восстановления: " + p.toShortString();
-                init(client, width, height);
+                status = "Общий min-угол восстановления: " + p.toShortString() + ". Перенос включён.";
             }
         }).dimensions(x, yy, w, bh).build());
         yy += 26;
