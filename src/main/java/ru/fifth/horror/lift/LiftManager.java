@@ -48,6 +48,7 @@ public final class LiftManager {
                 if (m != null) BUTTONS.putAll(m);
             }
         } catch (Exception ignored) {}
+        CursedLiftEventManager.load(server);
     }
 
     public static void register(LiftBlockEntity lift) {
@@ -190,6 +191,12 @@ public final class LiftManager {
                 lift.openDoors(100);
             } else if (player != null && restored) {
                 player.sendMessage(Text.literal("§8[§cFiven§8] §7Лифт приехал на §c" + floor + "§7, но двери заблокированы."), true);
+            }
+
+            // Paranormal arrival events are tied to a successful destination-layer switch.
+            // This is intentionally explicit, deterministic and never random.
+            if (restored && lift.isCursed()) {
+                CursedLiftEventManager.onArrival(server, lift, floor, player);
             }
 
             sendRideEnd(lift, floor);
