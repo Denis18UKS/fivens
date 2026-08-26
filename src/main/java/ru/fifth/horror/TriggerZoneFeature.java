@@ -7,7 +7,6 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.itemgroup.v1.ItemGroupEvents;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -37,12 +36,10 @@ public final class TriggerZoneFeature implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        ItemGroupEvents.modifyEntriesEvent(FifthMod.FIFTH_ITEM_GROUP_KEY).register(entries -> entries.add(TRIGGER_ZONE_TOOL));
         ServerLifecycleEvents.SERVER_STARTED.register(TriggerZoneManager::load);
         ServerTickEvents.END_SERVER_TICK.register(TriggerZoneManager::tick);
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-            // Requested standalone aliases.
             dispatcher.register(startTree("fiven_start"));
             dispatcher.register(cutsceneTree("fiven_catscene"));
             dispatcher.register(cutsceneTree("fiven_cutscene"));
@@ -52,7 +49,6 @@ public final class TriggerZoneFeature implements ModInitializer {
             dispatcher.register(scriptTree("fiven_script"));
             dispatcher.register(triggerTree("fiven_trigger"));
 
-            // The same actions are also available under the normal /fiven namespace.
             dispatcher.register(CommandManager.literal("fiven")
                     .then(startTree("start"))
                     .then(cutsceneTree("catscene"))
