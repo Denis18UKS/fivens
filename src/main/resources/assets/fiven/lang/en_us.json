@@ -34,5 +34,6 @@
   "item.fiven.cutscene_library_tool": "Cutscene Library",
   "block.fiven.clock_arms": "Clock Arms",
   "item.fiven.clock_arms": "Clock Arms",
-  "item.fiven.mfl_hiding_tool": "MFL Hiding Zones"
+  "item.fiven.mfl_hiding_tool": "MFL Hiding Zones",
+  "item.fiven.trigger_zone_tool": "Command Trigger Zones"
 }
