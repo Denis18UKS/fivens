@@ -36,7 +36,7 @@ public final class CutsceneManager {
         int sent=0;
         Set<UUID> unique=new HashSet<>();
         for(ServerPlayerEntity p:targets){
-            if(p==null||p.isDisconnected()||!unique.add(p.getUuid()))continue;
+            if(p==null||!unique.add(p.getUuid()))continue;
             PacketByteBuf buf=PacketByteBufs.create();
             buf.writeString(json,1_000_000);
             ServerPlayNetworking.send(p,FifthNetworking.CUTSCENE_PAYLOAD,buf);
