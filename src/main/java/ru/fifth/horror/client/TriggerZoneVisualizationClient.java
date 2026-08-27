@@ -1,6 +1,7 @@
 package ru.fifth.horror.client;
 
 import com.mojang.blaze3d.systems.RenderSystem;
+import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
@@ -16,10 +17,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /** Client-only read-only visualization of trigger zones selected by this director. */
-public final class TriggerZoneVisualizationClient {
+public final class TriggerZoneVisualizationClient implements ClientModInitializer {
     private static volatile List<Row> rows = List.of();
 
-    private TriggerZoneVisualizationClient() {}
+    @Override
+    public void onInitializeClient() {
+        init();
+    }
 
     public static void init() {
         ClientPlayNetworking.registerGlobalReceiver(TriggerZoneVisualizationServer.PAYLOAD, (client, handler, buf, sender) -> {
