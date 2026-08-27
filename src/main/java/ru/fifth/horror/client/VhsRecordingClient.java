@@ -48,6 +48,11 @@ public final class VhsRecordingClient implements ClientModInitializer {
             client.execute(() -> VhsRecordedPlayback.error(tvPos, message));
         });
 
+        ClientPlayNetworking.registerGlobalReceiver(VhsRecordingFeature.TV_DIAGNOSTIC, (client, handler, buf, sender) -> {
+            var tvPos = buf.readBlockPos();
+            client.execute(() -> VhsRecordedPlayback.startDiagnostic(tvPos));
+        });
+
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> VhsRecorderClient.captureNext(tickDelta));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             VhsRecorderClient.tick();
