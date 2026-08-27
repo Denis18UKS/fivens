@@ -19,14 +19,11 @@ import ru.fifth.horror.mixin.CameraAccessor;
 import ru.fifth.horror.mixin.MinecraftClientFramebufferAccessor;
 import ru.fifth.horror.mixin.WorldRendererVhsAccessor;
 
-/**
- * Off-screen camera helper used only while a director explicitly records a VHS.
- * Normal cassette playback never calls WorldRenderer.render(); it consumes PNGs from VhsRecordedPlayback.
- */
+/** Off-screen camera helper used only while a director explicitly records a real MP4 VHS. */
 public final class VhsWorldCapture {
-    private static final Logger LOGGER = LoggerFactory.getLogger("Fiven/VHS");
-    private static final int WIDTH = 256;
-    private static final int HEIGHT = 144;
+    private static final Logger LOGGER = LoggerFactory.getLogger("Fiven/Video");
+    public static final int WIDTH = 640;
+    public static final int HEIGHT = 360;
     private static SimpleFramebuffer scratch;
     private static boolean capturing;
 
@@ -34,13 +31,11 @@ public final class VhsWorldCapture {
 
     public static boolean isCapturing() { return capturing; }
 
-    /** Legacy playback hook retained as a no-op so old client wiring cannot accidentally render the live world. */
+    /** Legacy playback hook remains a no-op: normal tape playback never re-renders the live world. */
     public static void captureNext(float ignoredTickDelta) {}
-
-    /** Legacy texture lookup is intentionally disabled: real playback is owned by VhsRecordedPlayback. */
     public static Identifier texture(BlockPos ignored) { return null; }
 
-    /** Renders one authored camera sample into an isolated 256x144 framebuffer. */
+    /** Renders one authored camera sample into an isolated 640x360 framebuffer. */
     public static NativeImage captureFrame(VhsPlayback.Sample sample, float tickDelta) {
         if (capturing || sample == null) return null;
         MinecraftClient client = MinecraftClient.getInstance();
@@ -108,22 +103,14 @@ public final class VhsWorldCapture {
             scratchWriting = false;
             return readFramebuffer();
         } catch (Throwable error) {
-            LOGGER.warn("Authoring VHS frame capture failed.", error);
+            LOGGER.warn("MP4 authoring frame capture failed.", error);
             return null;
         } finally {
-            if (scratchWriting) {
-                try { scratch.endWrite(); } catch (Throwable ignored) {}
-            }
-            if (lightmap) {
-                try { client.gameRenderer.getLightmapTextureManager().disable(); } catch (Throwable ignored) {}
-            }
-            if (pushedModelView) {
-                try { modelView.pop(); RenderSystem.applyModelViewMatrix(); } catch (Throwable ignored) {}
-            }
+            if (scratchWriting) try { scratch.endWrite(); } catch (Throwable ignored) {}
+            if (lightmap) try { client.gameRenderer.getLightmapTextureManager().disable(); } catch (Throwable ignored) {}
+            if (pushedModelView) try { modelView.pop(); RenderSystem.applyModelViewMatrix(); } catch (Throwable ignored) {}
             try { RenderSystem.setProjectionMatrix(oldProjection, oldSorter); } catch (Throwable ignored) {}
-            if (framebufferSwapped) {
-                try { framebufferAccess.fiven$setFramebuffer(originalFramebuffer); } catch (Throwable ignored) {}
-            }
+            if (framebufferSwapped) try { framebufferAccess.fiven$setFramebuffer(originalFramebuffer); } catch (Throwable ignored) {}
             try { originalFramebuffer.beginWrite(true); } catch (Throwable ignored) {}
             capturing = false;
         }
@@ -133,9 +120,9 @@ public final class VhsWorldCapture {
         if (scratch == null) {
             scratch = new SimpleFramebuffer(WIDTH, HEIGHT, true, false);
             scratch.setTexFilter(9729);
-            return;
+        } else if (scratch.textureWidth != WIDTH || scratch.textureHeight != HEIGHT) {
+            scratch.resize(WIDTH, HEIGHT, false);
         }
-        if (scratch.textureWidth != WIDTH || scratch.textureHeight != HEIGHT) scratch.resize(WIDTH, HEIGHT, false);
     }
 
     private static NativeImage readFramebuffer() {
@@ -149,7 +136,7 @@ public final class VhsWorldCapture {
             return image;
         } catch (Throwable error) {
             try { scratch.endRead(); } catch (Throwable ignored) {}
-            LOGGER.warn("Could not read authoring VHS framebuffer.", error);
+            LOGGER.warn("Could not read MP4 authoring framebuffer.", error);
             return null;
         }
     }
