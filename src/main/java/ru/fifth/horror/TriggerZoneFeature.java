@@ -7,6 +7,7 @@ import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.command.argument.EntityArgumentType;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -21,6 +22,7 @@ import ru.fifth.horror.cutscene.CutsceneManager;
 import ru.fifth.horror.item.TriggerZoneToolItem;
 import ru.fifth.horror.script.FifthScriptEngine;
 import ru.fifth.horror.trigger.TriggerZoneManager;
+import ru.fifth.horror.trigger.TriggerZoneVisualizationServer;
 
 import java.util.Collection;
 import java.util.List;
@@ -36,8 +38,12 @@ public final class TriggerZoneFeature implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        ServerLifecycleEvents.SERVER_STARTED.register(TriggerZoneManager::load);
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            TriggerZoneVisualizationServer.reset();
+            TriggerZoneManager.load(server);
+        });
         ServerTickEvents.END_SERVER_TICK.register(TriggerZoneManager::tick);
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> TriggerZoneVisualizationServer.clear(handler.player.getUuid()));
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             dispatcher.register(startTree("fiven_start"));
@@ -127,6 +133,10 @@ public final class TriggerZoneFeature implements ModInitializer {
                         .then(CommandManager.argument("id", StringArgumentType.word())
                                 .then(CommandManager.argument("ticks", IntegerArgumentType.integer(0, 72_000))
                                         .executes(ctx -> cooldown(ctx.getSource(), StringArgumentType.getString(ctx, "id"), IntegerArgumentType.getInteger(ctx, "ticks"))))))
+                .then(CommandManager.literal("players")
+                        .then(CommandManager.argument("id", StringArgumentType.word())
+                                .then(CommandManager.argument("count", IntegerArgumentType.integer(1))
+                                        .executes(ctx -> players(ctx.getSource(), StringArgumentType.getString(ctx, "id"), IntegerArgumentType.getInteger(ctx, "count"))))))
                 .then(CommandManager.literal("once")
                         .then(CommandManager.argument("id", StringArgumentType.word())
                                 .then(CommandManager.argument("value", BoolArgumentType.bool())
@@ -135,6 +145,15 @@ public final class TriggerZoneFeature implements ModInitializer {
                         .then(CommandManager.argument("id", StringArgumentType.word())
                                 .then(CommandManager.argument("value", BoolArgumentType.bool())
                                         .executes(ctx -> enable(ctx.getSource(), StringArgumentType.getString(ctx, "id"), BoolArgumentType.getBool(ctx, "value"))))))
+                .then(CommandManager.literal("visualize")
+                        .then(CommandManager.literal("on")
+                                .executes(ctx -> visualize(ctx.getSource(), true, null))
+                                .then(CommandManager.argument("id", StringArgumentType.word())
+                                        .executes(ctx -> visualize(ctx.getSource(), true, StringArgumentType.getString(ctx, "id")))))
+                        .then(CommandManager.literal("off")
+                                .executes(ctx -> visualize(ctx.getSource(), false, null))
+                                .then(CommandManager.argument("id", StringArgumentType.word())
+                                        .executes(ctx -> visualize(ctx.getSource(), false, StringArgumentType.getString(ctx, "id"))))))
                 .then(CommandManager.literal("fire")
                         .then(CommandManager.argument("id", StringArgumentType.word())
                                 .executes(ctx -> fire(ctx.getSource(), StringArgumentType.getString(ctx, "id"), defaultTargets(ctx.getSource())))
@@ -179,7 +198,7 @@ public final class TriggerZoneFeature implements ModInitializer {
         TriggerZoneManager.Zone zone = TriggerZoneManager.put(source.getServer(), player.getServerWorld(), id, a, b,
                 command, TriggerZoneManager.Mode.ENTER, 10, false);
         source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §aТриггер-зона §f" + zone.id + " §aсохранена §8["
-                + zone.sizeText() + "]§7. Режим ENTER, cooldown 10 ticks."), false);
+                + zone.sizeText() + "]§7. ENTER, игроков: 1, cooldown: 10 ticks."), false);
         return 1;
     }
 
@@ -205,6 +224,13 @@ public final class TriggerZoneFeature implements ModInitializer {
         return 1;
     }
 
+    private static int players(ServerCommandSource source, String id, int count) {
+        if (!TriggerZoneManager.setMinPlayers(source.getServer(), id, count)) { source.sendError(Text.literal("Зона не найдена: " + id)); return 0; }
+        source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §7" + id + ": для срабатывания нужно игроков §f" + count), false);
+        TriggerZoneVisualizationServer.sync(source.getServer());
+        return 1;
+    }
+
     private static int once(ServerCommandSource source, String id, boolean value) {
         if (!TriggerZoneManager.setOnce(source.getServer(), id, value)) { source.sendError(Text.literal("Зона не найдена: " + id)); return 0; }
         source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §7" + id + ": одноразовая = §f" + value), false);
@@ -214,6 +240,28 @@ public final class TriggerZoneFeature implements ModInitializer {
     private static int enable(ServerCommandSource source, String id, boolean value) {
         if (!TriggerZoneManager.setEnabled(source.getServer(), id, value)) { source.sendError(Text.literal("Зона не найдена: " + id)); return 0; }
         source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §7" + id + ": enabled = §f" + value), false);
+        TriggerZoneVisualizationServer.sync(source.getServer());
+        return 1;
+    }
+
+    private static int visualize(ServerCommandSource source, boolean on, String id) {
+        ServerPlayerEntity player = sourcePlayer(source);
+        if (player == null) {
+            source.sendError(Text.literal("Визуализацию может включить только игрок-режиссёр."));
+            return 0;
+        }
+        if (id != null && TriggerZoneManager.get(source.getServer(), id) == null) {
+            source.sendError(Text.literal("Триггер-зона не найдена: " + id));
+            return 0;
+        }
+
+        if (on && id == null) TriggerZoneVisualizationServer.showAll(player);
+        else if (!on && id == null) TriggerZoneVisualizationServer.hideAll(player);
+        else if (on) TriggerZoneVisualizationServer.show(player, id);
+        else TriggerZoneVisualizationServer.hide(player, id);
+
+        String target = id == null ? "все зоны" : "зона " + id;
+        source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §7Визуализация: " + (on ? "§aВКЛ" : "§cВЫКЛ") + " §7— " + target + "."), false);
         return 1;
     }
 
@@ -234,8 +282,10 @@ public final class TriggerZoneFeature implements ModInitializer {
         }
         source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §7Триггер-зоны: §f" + zones.size()), false);
         for (TriggerZoneManager.Zone zone : zones) {
+            int current = TriggerZoneManager.currentCount(source.getServer(), zone.id);
             source.sendFeedback(() -> Text.literal("§8• §f" + zone.id + " §7[" + zone.mode + ", " + zone.sizeText()
-                    + ", " + (zone.enabled ? "ON" : "OFF") + "] §8→ §7/" + zone.command), false);
+                    + ", игроков " + current + "/" + zone.minPlayers + ", " + (zone.enabled ? "ON" : "OFF")
+                    + (zone.once ? ", ONCE" : "") + "] §8→ §7/" + zone.command), false);
         }
         return zones.size();
     }
@@ -243,9 +293,10 @@ public final class TriggerZoneFeature implements ModInitializer {
     private static int info(ServerCommandSource source, String id) {
         TriggerZoneManager.Zone zone = TriggerZoneManager.get(source.getServer(), id);
         if (zone == null) { source.sendError(Text.literal("Зона не найдена: " + id)); return 0; }
+        int current = TriggerZoneManager.currentCount(source.getServer(), zone.id);
         source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §f" + zone.id + " §7| " + zone.world + " | " + zone.sizeText()
-                + " | " + zone.mode + " | cd=" + zone.cooldownTicks + " | once=" + zone.once + " | enabled=" + zone.enabled
-                + " §8→ §7/" + zone.command), false);
+                + " | " + zone.mode + " | игроков=" + current + "/" + zone.minPlayers + " | cd=" + zone.cooldownTicks
+                + " | once=" + zone.once + " | enabled=" + zone.enabled + " §8→ §7/" + zone.command), false);
         return 1;
     }
 
