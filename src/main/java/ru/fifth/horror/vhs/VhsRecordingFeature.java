@@ -33,6 +33,7 @@ public final class VhsRecordingFeature implements ModInitializer {
     public static final Identifier FRAME_REQUEST = FifthMod.id("vhs_frame_request");
     public static final Identifier FRAME_DATA = FifthMod.id("vhs_frame_data");
     public static final Identifier PLAYBACK_ERROR = FifthMod.id("vhs_playback_error");
+    public static final Identifier TV_DIAGNOSTIC = FifthMod.id("vhs_tv_diagnostic");
 
     private static final Map<MinecraftServer, VhsRecordingStore> STORES = Collections.synchronizedMap(new WeakHashMap<>());
     private static final Map<UUID, String> ACTIVE_UPLOAD = new ConcurrentHashMap<>();
