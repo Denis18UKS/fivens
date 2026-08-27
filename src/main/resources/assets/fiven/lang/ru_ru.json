@@ -35,5 +35,6 @@
   "block.fiven.clock_arms": "Стрелки часов",
   "item.fiven.clock_arms": "Стрелки часов",
   "item.fiven.mfl_hiding_tool": "Зоны укрытия от MFL",
-  "item.fiven.trigger_zone_tool": "Триггер-зоны команд"
+  "item.fiven.trigger_zone_tool": "Триггер-зоны команд",
+  "item.fiven.checkpoint_tool": "Инструмент контрольных точек"
 }

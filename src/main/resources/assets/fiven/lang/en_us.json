@@ -35,5 +35,6 @@
   "block.fiven.clock_arms": "Clock Arms",
   "item.fiven.clock_arms": "Clock Arms",
   "item.fiven.mfl_hiding_tool": "MFL Hiding Zones",
-  "item.fiven.trigger_zone_tool": "Command Trigger Zones"
+  "item.fiven.trigger_zone_tool": "Command Trigger Zones",
+  "item.fiven.checkpoint_tool": "Shared Checkpoint Tool"
 }

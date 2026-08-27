@@ -14,12 +14,14 @@
       "ru.fifth.horror.MflTestCommands",
       "ru.fifth.horror.TvTestCommands",
       "ru.fifth.horror.TriggerZoneFeature",
-      "ru.fifth.horror.lift.LiftBindingFeature"
+      "ru.fifth.horror.lift.LiftBindingFeature",
+      "ru.fifth.horror.CheckpointFeature"
     ],
     "client": [
       "ru.fifth.horror.client.FifthClient",
       "ru.fifth.horror.client.TriggerZoneVisualizationClient",
-      "ru.fifth.horror.client.LiftBindingClient"
+      "ru.fifth.horror.client.LiftBindingClient",
+      "ru.fifth.horror.client.DeathSequenceClientFeature"
     ]
   },
   "mixins": ["fifth.mixins.json"],

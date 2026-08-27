@@ -7,7 +7,8 @@
   "mixins": [
     "MonsterForLiftHidingMixin",
     "MonsterForLiftRuntimeAccess",
-    "MonsterForLiftRuntimeMixin"
+    "MonsterForLiftRuntimeMixin",
+    "MonsterForLiftDeathMixin"
   ],
   "client": [
     "TitleScreenMixin",
