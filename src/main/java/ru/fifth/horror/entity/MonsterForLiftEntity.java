@@ -32,8 +32,9 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Monster For Lift. Movement is explicit: OFF entities stand still, SCRIPTED follows the authored route,
- * LOGICAL uses Minecraft navigation for patrol/search/chase. There is intentionally no random wander goal.
+ * Monster For Lift. OFF stands still, SCRIPTED follows authored route points and LOGICAL performs
+ * vision/search/chase. Locomotion animation is tied to actual client movement, so pathing can no longer
+ * visually slide while the model remains in idle.
  */
 public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEntity {
     public enum AiMode { OFF, LOGICAL, SCRIPTED }
@@ -62,6 +63,7 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
     private boolean routeLoop = true;
     private double routeSpeed = .72;
     private int routeIndex;
+    private int routeNavIndex = -1;
 
     private boolean huntEnabled;
     private boolean patrolEnabled;
@@ -73,7 +75,9 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
     private int searchTicks;
     private UUID chaseTarget;
     private Vec3d lastKnownTarget;
+    private Vec3d lastPathTarget;
     private int acquireCooldown;
+    private int chaseRepathCooldown;
     private int screamerCooldown;
 
     public MonsterForLiftEntity(EntityType<? extends PathAwareEntity> type, World world) { super(type, world); }
@@ -97,6 +101,7 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
         super.tick();
         if (getWorld().isClient) return;
         if (screamerCooldown > 0) screamerCooldown--;
+        if (chaseRepathCooldown > 0) chaseRepathCooldown--;
 
         if (manualAnimationTicks > 0) {
             manualAnimationTicks--;
@@ -114,7 +119,7 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
     private void tickScripted() {
         if (routeRunning && !route.isEmpty()) {
             tickRoute(routeSpeed);
-            setCurrentAnimation(getNavigation().isIdle() ? "idle" : "walking");
+            setCurrentAnimation(isActuallyMoving() || !getNavigation().isIdle() ? "walking" : "idle");
         } else {
             stopAutonomousMovement();
         }
@@ -128,23 +133,39 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
             if (target == null && --acquireCooldown <= 0) {
                 acquireCooldown = 8;
                 target = acquireVisiblePlayer(world);
-                if (target != null) chaseTarget = target.getUuid();
+                if (target != null) {
+                    chaseTarget = target.getUuid();
+                    chaseRepathCooldown = 0;
+                    lastPathTarget = null;
+                }
             }
 
             if (target != null && isValidTarget(target)) {
                 if (canSeeTarget(target)) {
-                    lastKnownTarget = target.getPos();
+                    Vec3d targetPos = target.getPos();
+                    lastKnownTarget = targetPos;
                     searchTicks = searchDurationTicks;
-                    getNavigation().startMovingTo(target, runSpeed);
+                    if (needsRepath(targetPos)) {
+                        getNavigation().startMovingTo(target, runSpeed);
+                        chaseRepathCooldown = 5;
+                        lastPathTarget = targetPos;
+                    }
                     setCurrentAnimation("run");
                     if (squaredDistanceTo(target) <= 1.55 * 1.55 && screamerCooldown <= 0) catchPlayer(target);
                     return;
                 }
 
                 if (lastKnownTarget != null && searchTicks-- > 0) {
-                    getNavigation().startMovingTo(lastKnownTarget.x, lastKnownTarget.y, lastKnownTarget.z, walkSpeed);
-                    setCurrentAnimation(getNavigation().isIdle() ? "idle" : "walking");
-                    if (getPos().squaredDistanceTo(lastKnownTarget) < 1.2) getNavigation().stop();
+                    if (getPos().squaredDistanceTo(lastKnownTarget) < 1.2) {
+                        getNavigation().stop();
+                        setCurrentAnimation("idle");
+                        return;
+                    }
+                    if (getNavigation().isIdle() || chaseRepathCooldown <= 0) {
+                        getNavigation().startMovingTo(lastKnownTarget.x, lastKnownTarget.y, lastKnownTarget.z, walkSpeed);
+                        chaseRepathCooldown = 10;
+                    }
+                    setCurrentAnimation(isActuallyMoving() || !getNavigation().isIdle() ? "walking" : "idle");
                     return;
                 }
                 clearChase();
@@ -155,10 +176,22 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
 
         if (patrolEnabled && routeRunning && !route.isEmpty()) {
             tickRoute(walkSpeed);
-            setCurrentAnimation(getNavigation().isIdle() ? "idle" : "walking");
+            setCurrentAnimation(isActuallyMoving() || !getNavigation().isIdle() ? "walking" : "idle");
         } else {
             stopAutonomousMovement();
         }
+    }
+
+    private boolean needsRepath(Vec3d targetPos) {
+        return getNavigation().isIdle()
+                || chaseRepathCooldown <= 0
+                || lastPathTarget == null
+                || lastPathTarget.squaredDistanceTo(targetPos) > 2.25;
+    }
+
+    private boolean isActuallyMoving() {
+        Vec3d v = getVelocity();
+        return v.x * v.x + v.z * v.z > 0.00012;
     }
 
     private void catchPlayer(ServerPlayerEntity player) {
@@ -199,7 +232,7 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
     }
 
     private boolean canSeeTarget(ServerPlayerEntity p) {
-        return canSee(p);
+        return !MflHidingManager.isHidden(p) && canSee(p);
     }
 
     private boolean inVisionCone(ServerPlayerEntity p) {
@@ -222,11 +255,14 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
     private void clearChase() {
         chaseTarget = null;
         lastKnownTarget = null;
+        lastPathTarget = null;
         searchTicks = 0;
+        chaseRepathCooldown = 0;
     }
 
     private void stopAutonomousMovement() {
         if (!getNavigation().isIdle()) getNavigation().stop();
+        routeNavIndex = -1;
         setCurrentAnimation("idle");
     }
 
@@ -235,21 +271,25 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
         Vec3d p = route.get(routeIndex);
         if (getPos().squaredDistanceTo(p) < .8) {
             routeIndex++;
+            routeNavIndex = -1;
             if (routeIndex >= route.size()) {
                 if (routeLoop) routeIndex = 0;
                 else { routeRunning = false; getNavigation().stop(); return; }
             }
             p = route.get(routeIndex);
         }
-        getNavigation().startMovingTo(p.x, p.y, p.z, Math.max(.15, Math.min(2.5, speed)));
+        if (routeNavIndex != routeIndex || getNavigation().isIdle() || age % 15 == 0) {
+            getNavigation().startMovingTo(p.x, p.y, p.z, Math.max(.15, Math.min(2.5, speed)));
+            routeNavIndex = routeIndex;
+        }
     }
 
-    public void addRoutePoint(Vec3d p) { route.add(p); }
-    public void clearRoute() { route.clear(); routeIndex = 0; routeRunning = false; getNavigation().stop(); }
+    public void addRoutePoint(Vec3d p) { route.add(p); routeNavIndex = -1; }
+    public void clearRoute() { route.clear(); routeIndex = 0; routeNavIndex = -1; routeRunning = false; getNavigation().stop(); }
     public List<Vec3d> getRoute() { return List.copyOf(route); }
     public boolean isRouteRunning() { return routeRunning; }
-    public void startRoute(boolean loop, double speed) { routeLoop = loop; routeSpeed = speed; routeIndex = 0; routeRunning = !route.isEmpty(); }
-    public void stopRoute() { routeRunning = false; getNavigation().stop(); }
+    public void startRoute(boolean loop, double speed) { routeLoop = loop; routeSpeed = speed; routeIndex = 0; routeNavIndex = -1; routeRunning = !route.isEmpty(); }
+    public void stopRoute() { routeRunning = false; routeNavIndex = -1; getNavigation().stop(); }
 
     public AiMode getAiMode() { return AiMode.values()[Math.max(0, Math.min(AiMode.values().length - 1, dataTracker.get(AI_MODE)))]; }
     public void setAiMode(AiMode mode) { dataTracker.set(AI_MODE, (mode == null ? AiMode.OFF : mode).ordinal()); if (mode == AiMode.OFF) stopAutonomousMovement(); }
@@ -299,8 +339,6 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
         getNavigation().stop();
         if (a.isBlank()) { manualAnimationTicks = 0; setCurrentAnimation("idle"); return; }
         switch (a) {
-            // Locomotion loops are predicate-driven only. Never register/trigger them as looping triggerable animations:
-            // a loop trigger owns the GeckoLib controller forever and was the cause of Hunt movement visually sliding.
             case "idle" -> { manualAnimationTicks = 80; setCurrentAnimation("idle"); }
             case "walking", "walk" -> { manualAnimationTicks = 80; setCurrentAnimation("walking"); }
             case "running", "run" -> { manualAnimationTicks = 80; setCurrentAnimation("run"); }
@@ -324,17 +362,36 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
 
     @Override
     public void registerControllers(AnimatableManager.ControllerRegistrar controllers) {
-        // The main controller is exclusively state/predicate driven. No looping triggerables are allowed here.
-        controllers.add(new AnimationController<>(this, "main", 2, state -> {
+        controllers.add(new AnimationController<>(this, "main", 1, state -> {
             String a = getCurrentAnimation();
-            if (a == null || a.isBlank() || a.startsWith("looking_") || "mfl_screamer".equals(a) || "mfl_hand".equals(a)) return state.setAndContinue(IDLE);
-            if ("idle".equals(a)) return state.setAndContinue(IDLE);
-            if ("walking".equals(a) || "walk".equals(a)) return state.setAndContinue(WALKING);
-            if ("run".equals(a) || "running".equals(a)) return state.setAndContinue(RUN);
+            boolean action = a != null && (a.startsWith("looking_") || "mfl_screamer".equals(a) || "mfl_hand".equals(a));
+            Vec3d velocity = getVelocity();
+            boolean physicallyMoving = state.isMoving() || velocity.x * velocity.x + velocity.z * velocity.z > 0.00012;
+            boolean wantsRun = "run".equals(a) || "running".equals(a);
+
+            // Physical motion wins over a stale tracked idle state. This is the anti-sliding path.
+            if (!action && physicallyMoving) {
+                if (wantsRun) {
+                    state.getController().setAnimationSpeed(2.75);
+                    return state.setAndContinue(RUN);
+                }
+                state.getController().setAnimationSpeed(1.8);
+                return state.setAndContinue(WALKING);
+            }
+
+            state.getController().setAnimationSpeed(1.0);
+            if (a == null || a.isBlank() || action || "idle".equals(a)) return state.setAndContinue(IDLE);
+            if ("walking".equals(a) || "walk".equals(a)) {
+                state.getController().setAnimationSpeed(1.8);
+                return state.setAndContinue(WALKING);
+            }
+            if (wantsRun) {
+                state.getController().setAnimationSpeed(2.75);
+                return state.setAndContinue(RUN);
+            }
             return state.setAndContinue(RawAnimation.begin().thenLoop(a));
         }));
 
-        // One-shot body/head actions live on an independent controller, so they can never latch or suppress locomotion.
         controllers.add(new AnimationController<>(this, "action", 1, state -> PlayState.STOP)
                 .triggerableAnim("look_left", LOOK_LEFT)
                 .triggerableAnim("look_right", LOOK_RIGHT)
@@ -388,6 +445,9 @@ public final class MonsterForLiftEntity extends PathAwareEntity implements GeoEn
         routeLoop = !n.contains("FivenMflRouteLoop") || n.getBoolean("FivenMflRouteLoop");
         routeSpeed = n.contains("FivenMflRouteSpeed") ? n.getDouble("FivenMflRouteSpeed") : .72;
         route.clear();
+        routeNavIndex = -1;
+        chaseRepathCooldown = 0;
+        lastPathTarget = null;
         NbtList list = n.getList("FivenMflRoute", NbtElement.COMPOUND_TYPE);
         for (int i = 0; i < list.size(); i++) {
             NbtCompound c = list.getCompound(i); route.add(new Vec3d(c.getDouble("x"), c.getDouble("y"), c.getDouble("z")));

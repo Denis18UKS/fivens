@@ -12,9 +12,13 @@
       "ru.fifth.horror.FivenExtraContent",
       "ru.fifth.horror.CursedLiftCommands",
       "ru.fifth.horror.MflTestCommands",
-      "ru.fifth.horror.TvTestCommands"
+      "ru.fifth.horror.TvTestCommands",
+      "ru.fifth.horror.TriggerZoneFeature"
     ],
-    "client": ["ru.fifth.horror.client.FifthClient"]
+    "client": [
+      "ru.fifth.horror.client.FifthClient",
+      "ru.fifth.horror.client.TriggerZoneVisualizationClient"
+    ]
   },
   "mixins": ["fifth.mixins.json"],
   "depends": {
