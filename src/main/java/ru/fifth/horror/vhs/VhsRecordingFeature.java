@@ -115,7 +115,8 @@ public final class VhsRecordingFeature implements ModInitializer {
         ServerPlayNetworking.registerGlobalReceiver(FRAME_REQUEST, (server, player, handler, buf, sender) -> {
             String id = VhsRecordingStore.safeId(buf.readString(128));
             int frameIndex = buf.readVarInt();
-            server.execute(() -> sendRequestedFrame(server, player, id, frameIndex));
+            BlockPos tvPos = buf.readableBytes() >= Long.BYTES ? buf.readBlockPos() : BlockPos.ORIGIN;
+            server.execute(() -> sendRequestedFrame(server, player, id, frameIndex, tvPos));
         });
     }
 
@@ -148,7 +149,7 @@ public final class VhsRecordingFeature implements ModInitializer {
         ServerPlayNetworking.send(player, PLAYBACK_ERROR, out);
     }
 
-    private static void sendRequestedFrame(MinecraftServer server, ServerPlayerEntity player, String id, int frameIndex) {
+    private static void sendRequestedFrame(MinecraftServer server, ServerPlayerEntity player, String id, int frameIndex, BlockPos tvPos) {
         Set<String> allowed = PLAYBACK_ALLOWED.get(player.getUuid());
         if (allowed == null || !allowed.contains(id) || !allowRequest(player.getUuid())) return;
         VhsRecordingStore store = store(server);
@@ -156,7 +157,7 @@ public final class VhsRecordingFeature implements ModInitializer {
         if (metadata == null || frameIndex < 0 || frameIndex >= metadata.frameCount()) return;
         byte[] png = store.readFrame(id, frameIndex);
         if (png == null) {
-            sendPlaybackError(player, BlockPos.ORIGIN, "TAPE READ ERROR");
+            sendPlaybackError(player, tvPos, "TAPE READ ERROR");
             return;
         }
         PacketByteBuf out = PacketByteBufs.create();
