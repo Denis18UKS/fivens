@@ -16,7 +16,8 @@
       "ru.fifth.horror.TriggerZoneFeature",
       "ru.fifth.horror.lift.LiftBindingFeature",
       "ru.fifth.horror.CheckpointFeature",
-      "ru.fifth.horror.vhs.VhsRecordingFeature"
+      "ru.fifth.horror.vhs.VhsRecordingFeature",
+      "ru.fifth.horror.video.VideoFeature"
     ],
     "client": [
       "ru.fifth.horror.client.FifthClient",
