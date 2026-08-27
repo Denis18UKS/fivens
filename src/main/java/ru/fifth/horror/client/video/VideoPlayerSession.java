@@ -41,6 +41,8 @@ public final class VideoPlayerSession implements AutoCloseable {
     private Thread decodeThread;
     private NativeImageBackedTexture texture;
     private Identifier textureId;
+    /** Latest media-time frame selected on the client tick; uploaded only if/when the TV is rendered. */
+    private DecodedFrame pendingFrame;
 
     public VideoPlayerSession(VideoAssetStore.Metadata metadata, BlockPos tvPos) {
         this.metadata = metadata;
@@ -82,8 +84,9 @@ public final class VideoPlayerSession implements AutoCloseable {
             return;
         }
         if (state == VideoPlaybackPolicy.State.PLAYING) {
-            if (audio != null) audio.update(tvPos);
             long elapsed = elapsedMicros();
+            advanceVideo(elapsed);
+            if (audio != null) audio.update(tvPos);
             if (elapsed >= metadata.durationMicros() && decoderDone) {
                 state = VideoPlaybackPolicy.State.ENDED;
                 running = false;
@@ -92,17 +95,29 @@ public final class VideoPlayerSession implements AutoCloseable {
         }
     }
 
-    /** Called from the render thread by TelevisionRenderer. */
-    public Identifier texture() {
-        if (state != VideoPlaybackPolicy.State.PLAYING || !error.isBlank()) return null;
-        long due = elapsedMicros();
+    /**
+     * Advances decode consumption even when the TV is outside the camera frustum. This prevents the
+     * bounded video queue from blocking FFmpeg (and therefore positional audio) just because the
+     * player looked away from the screen.
+     */
+    private void advanceVideo(long dueMicros) {
         DecodedFrame newest = null;
         while (true) {
             DecodedFrame frame = videoFrames.peek();
-            if (frame == null || frame.timestampMicros > due + 10_000L) break;
+            if (frame == null || frame.timestampMicros > dueMicros + 10_000L) break;
             newest = videoFrames.poll();
         }
-        if (newest != null) install(newest);
+        if (newest != null) pendingFrame = newest;
+    }
+
+    /** Called from the render thread by TelevisionRenderer. */
+    public Identifier texture() {
+        if (state != VideoPlaybackPolicy.State.PLAYING || !error.isBlank()) return null;
+        DecodedFrame selected = pendingFrame;
+        if (selected != null) {
+            pendingFrame = null;
+            install(selected);
+        }
         return textureId;
     }
 
@@ -229,6 +244,7 @@ public final class VideoPlayerSession implements AutoCloseable {
         running = false;
         if (decodeThread != null) decodeThread.interrupt();
         videoFrames.clear();
+        pendingFrame = null;
         if (audio != null) audio.close();
         if (texture != null) {
             try { texture.close(); } catch (Throwable ignored) {}
