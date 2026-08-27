@@ -1,3 +1,31 @@
 package ru.fifth.horror.item;
-import net.minecraft.client.item.TooltipContext;import net.minecraft.item.Item;import net.minecraft.item.ItemStack;import net.minecraft.text.Text;import net.minecraft.world.World;import java.util.List;
-public final class VhsCassetteItem extends Item{public VhsCassetteItem(Settings s){super(s.maxCount(1));}public static String recording(ItemStack st){return st.hasNbt()?st.getNbt().getString("FivenRecordingId"):"";}public static void setRecording(ItemStack st,String id){st.getOrCreateNbt().putString("FivenRecordingId",id==null?"":id);if(id!=null&&!id.isBlank())st.setCustomName(Text.literal("VHS: "+id));}@Override public void appendTooltip(ItemStack st,World w,List<Text> lines,TooltipContext c){String r=recording(st);lines.add(Text.literal(r.isBlank()?"§7Пустая кассета":"§7Запись: §f"+r));}}
+
+import net.minecraft.client.item.TooltipContext;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.text.Text;
+import net.minecraft.world.World;
+
+import java.util.List;
+
+public final class VhsCassetteItem extends Item {
+    public VhsCassetteItem(Settings settings) { super(settings.maxCount(1)); }
+
+    public static String recording(ItemStack stack) {
+        return stack.hasNbt() ? stack.getNbt().getString("FivenRecordingId") : "";
+    }
+
+    public static void setRecording(ItemStack stack, String id) {
+        String value = id == null ? "" : id;
+        stack.getOrCreateNbt().putString("FivenRecordingId", value);
+        if (!value.isBlank()) stack.setCustomName(Text.literal("VHS: " + value));
+    }
+
+    @Override
+    public void appendTooltip(ItemStack stack, World world, List<Text> lines, TooltipContext context) {
+        String id = recording(stack);
+        lines.add(Text.literal(id.isBlank()
+                ? "§7Пустая / legacy-кассета — сначала запишите VHS"
+                : "§7Записанная VHS: §f" + id));
+    }
+}
