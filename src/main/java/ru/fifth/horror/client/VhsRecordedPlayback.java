@@ -36,6 +36,42 @@ public final class VhsRecordedPlayback {
         if (old != null) old.closeTextureOnly();
     }
 
+    /**
+     * Creates a local one-frame checker/test card. This verifies the physical CRT plane/mixin without
+     * depending on cassette metadata, server frame storage or a live secondary world render.
+     */
+    public static void startDiagnostic(BlockPos tvPos) {
+        if (tvPos == null) return;
+        String id = "__tv_diagnostic__";
+        FrameCache cache = CACHE.computeIfAbsent(id, ignored -> new FrameCache(id, 256, 144, 1, 1));
+        if (!cache.matches(256, 144, 1, 1)) {
+            cache.close();
+            cache = new FrameCache(id, 256, 144, 1, 1);
+            CACHE.put(id, cache);
+        }
+        if (cache.frames[0] == null) {
+            try (NativeImage image = new NativeImage(256, 144, false)) {
+                for (int y = 0; y < 144; y++) {
+                    for (int x = 0; x < 256; x++) {
+                        boolean border = x < 5 || x >= 251 || y < 5 || y >= 139;
+                        boolean cross = Math.abs(x - 128) < 2 || Math.abs(y - 72) < 2;
+                        boolean checker = (((x / 16) + (y / 16)) & 1) == 0;
+                        int grey = checker ? 0xD8 : 0x38;
+                        if (border) image.setColor(x, y, 0xFFFFFFFF);
+                        else if (cross) image.setColor(x, y, 0xFF2020FF);
+                        else image.setColor(x, y, 0xFF000000 | (grey << 16) | (grey << 8) | grey);
+                    }
+                }
+                cache.frames[0] = image.getBytes();
+                cache.requested[0] = true;
+            } catch (Exception error) {
+                return;
+            }
+        }
+        Session old = SESSIONS.put(tvPos.asLong(), new Session(tvPos.toImmutable(), cache, 120));
+        if (old != null) old.closeTextureOnly();
+    }
+
     public static void receiveFrame(String id, int frameIndex, byte[] png) {
         FrameCache cache = CACHE.get(id);
         if (cache == null || png == null || png.length == 0 || frameIndex < 0 || frameIndex >= cache.frameCount) return;
