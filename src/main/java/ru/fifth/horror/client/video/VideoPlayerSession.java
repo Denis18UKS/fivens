@@ -5,17 +5,15 @@ import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.FrameGrabber;
-import org.bytedeco.javacv.Java2DFrameConverter;
 import ru.fifth.horror.video.VideoAssetStore;
 import ru.fifth.horror.video.VideoPlaybackPolicy;
 
-import java.awt.Graphics2D;
-import java.awt.RenderingHints;
-import java.awt.image.BufferedImage;
 import java.nio.Buffer;
+import java.nio.ByteBuffer;
 import java.nio.ShortBuffer;
 import java.nio.file.Path;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -136,17 +134,18 @@ public final class VideoPlayerSession implements AutoCloseable {
 
     private void decodeLoop() {
         FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(media.toFile());
-        Java2DFrameConverter converter = new Java2DFrameConverter();
         try {
             grabber.setSampleMode(FrameGrabber.SampleMode.SHORT);
+            // The previous Java2D conversion path produced platform-dependent channel corruption on Windows.
+            // Force one explicit FFmpeg output layout and copy RGBA bytes ourselves instead.
+            grabber.setPixelFormat(avutil.AV_PIX_FMT_RGBA);
             if (metadata.hasAudio()) grabber.setAudioChannels(Math.min(2, Math.max(1, metadata.audioChannels())));
             grabber.start();
             Frame frame;
             while (running && (frame = grabber.grab()) != null) {
                 long timestamp = Math.max(0L, frame.timestamp);
-                if (frame.image != null) {
-                    BufferedImage source = converter.convert(frame);
-                    if (source != null) videoFrames.put(toDecodedFrame(source, timestamp));
+                if (frame.image != null && frame.image.length > 0) {
+                    videoFrames.put(toDecodedFrame(frame, timestamp));
                 }
                 if (audio != null && frame.samples != null && frame.samples.length > 0) {
                     short[] pcm = copyPcm(frame.samples, Math.min(2, Math.max(1, frame.audioChannels)));
@@ -163,28 +162,35 @@ public final class VideoPlayerSession implements AutoCloseable {
         } finally {
             try { grabber.stop(); } catch (Throwable ignored) {}
             try { grabber.release(); } catch (Throwable ignored) {}
-            try { converter.close(); } catch (Throwable ignored) {}
         }
     }
 
-    private static DecodedFrame toDecodedFrame(BufferedImage source, long timestamp) {
-        BufferedImage scaled = new BufferedImage(OUTPUT_WIDTH, OUTPUT_HEIGHT, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D graphics = scaled.createGraphics();
-        try {
-            graphics.setColor(java.awt.Color.BLACK);
-            graphics.fillRect(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
-            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            double scale = Math.min(OUTPUT_WIDTH / (double) Math.max(1, source.getWidth()), OUTPUT_HEIGHT / (double) Math.max(1, source.getHeight()));
-            int width = Math.max(1, (int) Math.round(source.getWidth() * scale));
-            int height = Math.max(1, (int) Math.round(source.getHeight() * scale));
-            int x = (OUTPUT_WIDTH - width) / 2;
-            int y = (OUTPUT_HEIGHT - height) / 2;
-            graphics.drawImage(source, x, y, width, height, null);
-        } finally {
-            graphics.dispose();
+    private static DecodedFrame toDecodedFrame(Frame frame, long timestamp) {
+        if (frame.image == null || frame.image.length == 0 || !(frame.image[0] instanceof ByteBuffer pixels)) {
+            throw new IllegalStateException("FFmpeg did not return RGBA8 bytes");
         }
-        int[] argb = scaled.getRGB(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT, null, 0, OUTPUT_WIDTH);
-        return new DecodedFrame(timestamp, argb);
+        int width = frame.imageWidth;
+        int height = frame.imageHeight;
+        int stride = frame.imageStride;
+        if (width <= 0 || height <= 0 || stride <= 0 || frame.imageChannels != 4) {
+            throw new IllegalStateException("Unexpected FFmpeg RGBA layout: " + width + "x" + height
+                    + " channels=" + frame.imageChannels + " stride=" + stride);
+        }
+
+        int rowBytes = Math.multiplyExact(width, 4);
+        if (stride < rowBytes) throw new IllegalStateException("FFmpeg RGBA stride is too small");
+        int required = Math.addExact(Math.multiplyExact(height - 1, stride), rowBytes);
+        ByteBuffer copy = pixels.duplicate();
+        copy.rewind();
+        if (copy.remaining() < required) {
+            throw new IllegalStateException("FFmpeg RGBA buffer is truncated: " + copy.remaining() + " < " + required);
+        }
+        byte[] rgba = new byte[required];
+        copy.get(rgba);
+
+        int[] sourceArgb = VideoFramePixels.rgbaToArgb(rgba, width, height, stride);
+        int[] outputArgb = VideoFramePixels.letterboxNearest(sourceArgb, width, height, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+        return new DecodedFrame(timestamp, outputArgb);
     }
 
     private static short[] copyPcm(Buffer[] buffers, int channels) {
@@ -230,6 +236,7 @@ public final class VideoPlayerSession implements AutoCloseable {
                     int r = (argb >>> 16) & 0xFF;
                     int g = (argb >>> 8) & 0xFF;
                     int b = argb & 0xFF;
+                    // NativeImage stores RGBA bytes in little-endian ABGR ints.
                     image.setColor(x, y, (a << 24) | (b << 16) | (g << 8) | r);
                 }
             }
