@@ -12,7 +12,7 @@ import ru.fifth.horror.vhs.VhsRecordingFeature;
 import ru.fifth.horror.vhs.VhsRecordingPolicy;
 import ru.fifth.horror.vhs.VhsRecordingStore;
 
-/** Explicit authoring-only recorder. One sampled off-screen frame is captured per rendered client frame. */
+/** Explicit authoring-only recorder. Captures the saved camera timeline at real 15 FPS pacing. */
 public final class VhsRecorderClient {
     public static final int WIDTH = 256;
     public static final int HEIGHT = 144;
@@ -24,6 +24,7 @@ public final class VhsRecorderClient {
     private static int durationTicks;
     private static int frameCount;
     private static int frameIndex;
+    private static int elapsedTicks;
     private static boolean waitingBegin;
     private static boolean recording;
     private static boolean waitingFinish;
@@ -55,6 +56,7 @@ public final class VhsRecorderClient {
         durationTicks = Math.max(1, total);
         frameCount = (int) frames;
         frameIndex = 0;
+        elapsedTicks = 0;
         waitingBegin = true;
         recording = false;
         waitingFinish = false;
@@ -81,8 +83,9 @@ public final class VhsRecorderClient {
                 message("§c" + serverMessage);
                 return;
             }
+            elapsedTicks = 0;
             recording = true;
-            message("§aЗапись VHS началась: §f" + recordingId + " §7(" + frameCount + " кадров)");
+            message("§aЗапись VHS началась: §f" + recordingId + " §7(" + frameCount + " кадров / 15 FPS)");
             return;
         }
         if ("error".equals(phase)) {
@@ -99,7 +102,7 @@ public final class VhsRecorderClient {
         }
     }
 
-    /** Called from HudRenderCallback after the normal world pass. */
+    /** Called from HudRenderCallback after the normal world pass; captures only when this 15 FPS sample is due. */
     public static void captureNext(float tickDelta) {
         if (!recording || scene == null) return;
         if (frameIndex >= frameCount) {
@@ -108,6 +111,8 @@ public final class VhsRecorderClient {
         }
 
         int sampleTick = (int) Math.min(durationTicks - 1L, frameIndex * 20L / FPS);
+        if (sampleTick > elapsedTicks) return;
+
         VhsPlayback.Sample sample = sample(scene, sampleTick);
         NativeImage image = VhsWorldCapture.captureFrame(sample, tickDelta);
         if (image == null) {
@@ -143,7 +148,9 @@ public final class VhsRecorderClient {
         MinecraftClient client = MinecraftClient.getInstance();
         if ((waitingBegin || recording || waitingFinish) && (client.world == null || client.player == null)) {
             reset();
+            return;
         }
+        if (recording && elapsedTicks < durationTicks) elapsedTicks++;
     }
 
     public static boolean active() {
@@ -171,6 +178,7 @@ public final class VhsRecorderClient {
         durationTicks = 0;
         frameCount = 0;
         frameIndex = 0;
+        elapsedTicks = 0;
         waitingBegin = false;
         recording = false;
         waitingFinish = false;
