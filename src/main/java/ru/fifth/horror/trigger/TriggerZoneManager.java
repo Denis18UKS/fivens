@@ -188,10 +188,19 @@ public final class TriggerZoneManager {
             switch (zone.mode) {
                 case ENTER -> {
                     if (minimum <= 1) {
-                        // Backward-compatible legacy behavior: every individual entrance can fire.
+                        List<ServerPlayerEntity> entrants = new ArrayList<>();
                         for (ServerPlayerEntity player : currentPlayers) {
-                            if (!previous.contains(player.getUuid())) tryFireIndividual(zone, server, player);
-                            if (!zone.enabled) break;
+                            if (!previous.contains(player.getUuid())) entrants.add(player);
+                        }
+                        if (zone.once && !entrants.isEmpty()) {
+                            // One-shot activation is group-safe even when several players enter in the same server tick.
+                            if (groupCooldownReady(zone, server)) fireGroup(zone, server, currentPlayers);
+                        } else {
+                            // Backward-compatible legacy behavior: every individual entrance can fire.
+                            for (ServerPlayerEntity player : entrants) {
+                                tryFireIndividual(zone, server, player);
+                                if (!zone.enabled) break;
+                            }
                         }
                     } else if (TriggerOccupancyPolicy.enterCrossed(previousCount, currentCount, minimum)
                             && groupCooldownReady(zone, server)) {
@@ -209,11 +218,19 @@ public final class TriggerZoneManager {
                 }
                 case EXIT -> {
                     if (minimum <= 1) {
+                        List<ServerPlayerEntity> exited = new ArrayList<>();
                         for (UUID uuid : new LinkedHashSet<>(previous)) {
                             if (current.contains(uuid)) continue;
                             ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
-                            if (isRuntimePlayer(player)) tryFireIndividual(zone, server, player);
-                            if (!zone.enabled) break;
+                            if (isRuntimePlayer(player)) exited.add(player);
+                        }
+                        if (zone.once && !exited.isEmpty()) {
+                            if (groupCooldownReady(zone, server)) fireGroup(zone, server, onlinePlayers(server, previous));
+                        } else {
+                            for (ServerPlayerEntity player : exited) {
+                                tryFireIndividual(zone, server, player);
+                                if (!zone.enabled) break;
+                            }
                         }
                     } else if (TriggerOccupancyPolicy.exitQualified(previousCount, currentCount, minimum)
                             && groupCooldownReady(zone, server)) {
