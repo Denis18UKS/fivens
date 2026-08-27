@@ -5,52 +5,52 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.text.Text;
+import ru.fifth.horror.client.video.VideoPlaybackManager;
+import ru.fifth.horror.client.video.VideoUploadClient;
 import ru.fifth.horror.vhs.VhsRecordingFeature;
-import ru.fifth.horror.vhs.VhsRecordingPolicy;
+import ru.fifth.horror.video.VideoAssetPolicy;
+import ru.fifth.horror.video.VideoFeature;
 
-/** Registers the authoring recorder and immutable stored-frame TV playback on the client. */
+/** Client registration for real-video authoring/import/playback plus the standalone CRT diagnostic. */
 public final class VhsRecordingClient implements ClientModInitializer {
     private boolean wasInWorld;
 
     @Override
     public void onInitializeClient() {
-        ClientPlayNetworking.registerGlobalReceiver(VhsRecordingFeature.RECORD_ACK, (client, handler, buf, sender) -> {
+        ClientPlayNetworking.registerGlobalReceiver(VideoFeature.UPLOAD_STATUS, (client, handler, buf, sender) -> {
             String phase = buf.readString(16);
             String id = buf.readString(128);
             boolean success = buf.readBoolean();
             String message = buf.readString(256);
-            client.execute(() -> VhsRecorderClient.handleAck(phase, id, success, message));
+            client.execute(() -> VideoUploadClient.handleStatus(phase, id, success, message));
         });
 
-        ClientPlayNetworking.registerGlobalReceiver(VhsRecordingFeature.PLAYBACK_START, (client, handler, buf, sender) -> {
-            String id = buf.readString(128);
-            int width = buf.readVarInt();
-            int height = buf.readVarInt();
-            int fps = buf.readVarInt();
-            int frameCount = buf.readVarInt();
-            int durationTicks = buf.readVarInt();
+        ClientPlayNetworking.registerGlobalReceiver(VideoFeature.PLAYBACK_START, (client, handler, buf, sender) -> {
+            var metadata = VideoFeature.readMetadata(buf);
             var tvPos = buf.readBlockPos();
-            client.execute(() -> VhsRecordedPlayback.start(id, width, height, fps, frameCount, durationTicks, tvPos));
+            client.execute(() -> VideoPlaybackManager.start(metadata, tvPos));
         });
 
-        ClientPlayNetworking.registerGlobalReceiver(VhsRecordingFeature.FRAME_DATA, (client, handler, buf, sender) -> {
+        ClientPlayNetworking.registerGlobalReceiver(VideoFeature.CHUNK_DATA, (client, handler, buf, sender) -> {
             String id = buf.readString(128);
-            int frameIndex = buf.readVarInt();
-            byte[] png;
+            long offset = buf.readLong();
+            byte[] bytes;
             try {
-                png = buf.readByteArray(VhsRecordingPolicy.MAX_FRAME_BYTES);
+                bytes = buf.readByteArray(VideoAssetPolicy.CHUNK_BYTES);
             } catch (RuntimeException malformed) {
                 return;
             }
-            client.execute(() -> VhsRecordedPlayback.receiveFrame(id, frameIndex, png));
+            boolean eof = buf.readBoolean();
+            client.execute(() -> VideoPlaybackManager.receiveChunk(id, offset, bytes, eof));
         });
 
-        ClientPlayNetworking.registerGlobalReceiver(VhsRecordingFeature.PLAYBACK_ERROR, (client, handler, buf, sender) -> {
+        ClientPlayNetworking.registerGlobalReceiver(VideoFeature.PLAYBACK_ERROR, (client, handler, buf, sender) -> {
             var tvPos = buf.readBlockPos();
             String message = buf.readString(256);
-            client.execute(() -> VhsRecordedPlayback.error(tvPos, message));
+            client.execute(() -> VideoPlaybackManager.error(tvPos, message));
         });
 
+        // /fiven tv test deliberately stays independent from stored media and FFmpeg sessions.
         ClientPlayNetworking.registerGlobalReceiver(VhsRecordingFeature.TV_DIAGNOSTIC, (client, handler, buf, sender) -> {
             var tvPos = buf.readBlockPos();
             client.execute(() -> {
@@ -64,9 +64,12 @@ public final class VhsRecordingClient implements ClientModInitializer {
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> VhsRecorderClient.captureNext(tickDelta));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             VhsRecorderClient.tick();
-            VhsRecordedPlayback.tick();
+            VideoUploadClient.tick();
+            VideoPlaybackManager.tick();
+            VhsRecordedPlayback.tick(); // diagnostic session only
             boolean inWorld = client.world != null;
             if (!inWorld && wasInWorld) {
+                VideoPlaybackManager.clear();
                 VhsRecordedPlayback.clear();
                 VhsSignalTexture.clear();
             }
