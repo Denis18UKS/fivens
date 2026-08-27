@@ -10,10 +10,7 @@ import ru.fifth.horror.client.CutscenePlayback;
 import ru.fifth.horror.client.LiftTravelHudPolicy;
 import ru.fifth.horror.client.LiftTravelOverlay;
 
-/**
- * Keeps ordinary cutscene HUD hiding, but gives lift travel its own final render pass.
- * The tail injection still runs when vanilla HUD elements are hidden with F1.
- */
+/** Ordinary HUD suppression only. Lift graphics themselves render from GameRenderer, outside F1. */
 @Mixin(InGameHud.class)
 public class InGameHudMixin {
     @Inject(method = "render", at = @At("HEAD"), cancellable = true)
@@ -21,10 +18,5 @@ public class InGameHudMixin {
         if (LiftTravelHudPolicy.cancelVanillaHud(CutscenePlayback.hideHud(), LiftTravelOverlay.active())) {
             ci.cancel();
         }
-    }
-
-    @Inject(method = "render", at = @At("TAIL"))
-    private void fifth$renderLiftTravelLast(DrawContext context, float tickDelta, CallbackInfo ci) {
-        LiftTravelOverlay.render(context);
     }
 }
