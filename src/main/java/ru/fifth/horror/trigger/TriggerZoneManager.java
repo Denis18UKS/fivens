@@ -25,7 +25,10 @@ public final class TriggerZoneManager {
     private static final Type ZONE_TYPE = new TypeToken<Map<String, Zone>>() {}.getType();
     private static final Map<String, Zone> ZONES = new ConcurrentHashMap<>();
     private static final Map<String, Set<UUID>> INSIDE = new ConcurrentHashMap<>();
+    /** Per-player cooldown used by STAY and legacy minPlayers=1 enter/exit behavior. */
     private static final Map<String, Map<UUID, Long>> LAST_FIRE = new ConcurrentHashMap<>();
+    /** Group cooldown used by multiplayer ENTER/EXIT threshold events. */
+    private static final Map<String, Long> LAST_GROUP_FIRE = new ConcurrentHashMap<>();
     private static MinecraftServer loadedServer;
     private static long tick;
 
@@ -37,6 +40,7 @@ public final class TriggerZoneManager {
         ZONES.clear();
         INSIDE.clear();
         LAST_FIRE.clear();
+        LAST_GROUP_FIRE.clear();
         try {
             Path file = file(server);
             if (!Files.exists(file)) return;
@@ -47,7 +51,9 @@ public final class TriggerZoneManager {
                     if (zone != null) ZONES.put(zone.id, zone);
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Exception error) {
+            System.err.println("[Fiven/Trigger] Failed to load trigger zones: " + error.getMessage());
+        }
     }
 
     public static Collection<Zone> list(MinecraftServer server) {
@@ -60,6 +66,12 @@ public final class TriggerZoneManager {
     public static Zone get(MinecraftServer server, String id) {
         load(server);
         return ZONES.get(safeId(id));
+    }
+
+    public static int currentCount(MinecraftServer server, String id) {
+        load(server);
+        Set<UUID> players = INSIDE.get(safeId(id));
+        return players == null ? 0 : players.size();
     }
 
     public static Zone put(MinecraftServer server, ServerWorld world, String id, BlockPos a, BlockPos b,
@@ -76,11 +88,11 @@ public final class TriggerZoneManager {
         zone.command = normalizeCommand(command);
         zone.mode = mode == null ? Mode.ENTER : mode;
         zone.cooldownTicks = Math.max(0, Math.min(72_000, cooldownTicks));
+        zone.minPlayers = 1;
         zone.once = once;
         zone.enabled = true;
         ZONES.put(key, zone);
-        INSIDE.remove(key);
-        LAST_FIRE.remove(key);
+        resetRuntimeState(key);
         save(server);
         return zone;
     }
@@ -89,8 +101,7 @@ public final class TriggerZoneManager {
         load(server);
         String key = safeId(id);
         boolean removed = ZONES.remove(key) != null;
-        INSIDE.remove(key);
-        LAST_FIRE.remove(key);
+        resetRuntimeState(key);
         if (removed) save(server);
         return removed;
     }
@@ -99,6 +110,7 @@ public final class TriggerZoneManager {
         Zone zone = get(server, id);
         if (zone == null || mode == null) return false;
         zone.mode = mode;
+        resetRuntimeState(zone.id);
         save(server);
         return true;
     }
@@ -107,6 +119,17 @@ public final class TriggerZoneManager {
         Zone zone = get(server, id);
         if (zone == null) return false;
         zone.cooldownTicks = Math.max(0, Math.min(72_000, ticks));
+        LAST_FIRE.remove(zone.id);
+        LAST_GROUP_FIRE.remove(zone.id);
+        save(server);
+        return true;
+    }
+
+    public static boolean setMinPlayers(MinecraftServer server, String id, int count) {
+        Zone zone = get(server, id);
+        if (zone == null) return false;
+        zone.minPlayers = TriggerOccupancyPolicy.minimum(count);
+        resetRuntimeState(zone.id);
         save(server);
         return true;
     }
@@ -123,15 +146,15 @@ public final class TriggerZoneManager {
         Zone zone = get(server, id);
         if (zone == null) return false;
         zone.enabled = enabled;
-        INSIDE.remove(zone.id);
-        LAST_FIRE.remove(zone.id);
+        resetRuntimeState(zone.id);
         save(server);
         return true;
     }
 
+    /** Manual director fire bypasses occupancy thresholds by design. */
     public static boolean fire(MinecraftServer server, String id, ServerPlayerEntity player) {
         Zone zone = get(server, id);
-        if (zone == null || !zone.enabled) return false;
+        if (zone == null || !zone.enabled || player == null) return false;
         execute(zone, server, player);
         return true;
     }
@@ -147,47 +170,126 @@ public final class TriggerZoneManager {
 
             Box box = zone.box();
             Set<UUID> previous = INSIDE.computeIfAbsent(zone.id, ignored -> ConcurrentHashMap.newKeySet());
-            Set<UUID> current = new HashSet<>();
+            Set<UUID> current = new LinkedHashSet<>();
+            List<ServerPlayerEntity> currentPlayers = new ArrayList<>();
 
             for (ServerPlayerEntity player : world.getPlayers()) {
                 if (!player.isAlive() || player.isSpectator()) continue;
-                boolean inside = box.intersects(player.getBoundingBox());
-                if (inside) current.add(player.getUuid());
-
-                boolean fire = switch (zone.mode) {
-                    case ENTER -> inside && !previous.contains(player.getUuid());
-                    case STAY -> inside;
-                    case EXIT -> false;
-                };
-                if (fire) tryFire(zone, server, player);
-            }
-
-            if (zone.mode == Mode.EXIT) {
-                for (UUID uuid : new HashSet<>(previous)) {
-                    if (current.contains(uuid)) continue;
-                    ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
-                    if (player != null) tryFire(zone, server, player);
+                if (box.intersects(player.getBoundingBox())) {
+                    current.add(player.getUuid());
+                    currentPlayers.add(player);
                 }
             }
 
-            previous.clear();
-            previous.addAll(current);
+            int previousCount = previous.size();
+            int currentCount = current.size();
+            int minimum = TriggerOccupancyPolicy.minimum(zone.minPlayers);
+
+            switch (zone.mode) {
+                case ENTER -> {
+                    if (minimum <= 1) {
+                        // Backward-compatible legacy behavior: every individual entrance can fire.
+                        for (ServerPlayerEntity player : currentPlayers) {
+                            if (!previous.contains(player.getUuid())) tryFireIndividual(zone, server, player);
+                            if (!zone.enabled) break;
+                        }
+                    } else if (TriggerOccupancyPolicy.enterCrossed(previousCount, currentCount, minimum)
+                            && groupCooldownReady(zone, server)) {
+                        fireGroup(zone, server, currentPlayers);
+                    }
+                }
+                case STAY -> {
+                    if (TriggerOccupancyPolicy.stayEligible(currentCount, minimum)) {
+                        if (zone.once) {
+                            if (groupCooldownReady(zone, server)) fireGroup(zone, server, currentPlayers);
+                        } else {
+                            for (ServerPlayerEntity player : currentPlayers) tryFireIndividual(zone, server, player);
+                        }
+                    }
+                }
+                case EXIT -> {
+                    if (minimum <= 1) {
+                        for (UUID uuid : new LinkedHashSet<>(previous)) {
+                            if (current.contains(uuid)) continue;
+                            ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
+                            if (isRuntimePlayer(player)) tryFireIndividual(zone, server, player);
+                            if (!zone.enabled) break;
+                        }
+                    } else if (TriggerOccupancyPolicy.exitQualified(previousCount, currentCount, minimum)
+                            && groupCooldownReady(zone, server)) {
+                        fireGroup(zone, server, onlinePlayers(server, previous));
+                    }
+                }
+            }
+
+            if (zone.enabled) {
+                previous.clear();
+                previous.addAll(current);
+            } else {
+                INSIDE.remove(zone.id);
+            }
         }
+
+        TriggerZoneVisualizationServer.sync(server);
     }
 
-    private static void tryFire(Zone zone, MinecraftServer server, ServerPlayerEntity player) {
+    private static boolean groupCooldownReady(Zone zone, MinecraftServer server) {
+        long now = server.getTicks();
+        long previous = LAST_GROUP_FIRE.getOrDefault(zone.id, Long.MIN_VALUE / 4);
+        if (zone.cooldownTicks > 0 && now - previous < zone.cooldownTicks) return false;
+        LAST_GROUP_FIRE.put(zone.id, now);
+        return true;
+    }
+
+    private static boolean tryFireIndividual(Zone zone, MinecraftServer server, ServerPlayerEntity player) {
+        if (!zone.enabled || !isRuntimePlayer(player)) return false;
         Map<UUID, Long> last = LAST_FIRE.computeIfAbsent(zone.id, ignored -> new ConcurrentHashMap<>());
         long now = server.getTicks();
         long previous = last.getOrDefault(player.getUuid(), Long.MIN_VALUE / 4);
-        if (zone.cooldownTicks > 0 && now - previous < zone.cooldownTicks) return;
+        if (zone.cooldownTicks > 0 && now - previous < zone.cooldownTicks) return false;
         last.put(player.getUuid(), now);
         execute(zone, server, player);
-        if (zone.once) {
-            zone.enabled = false;
-            INSIDE.remove(zone.id);
-            LAST_FIRE.remove(zone.id);
-            save(server);
+        if (zone.once) disableAfterOnce(zone, server);
+        return true;
+    }
+
+    /** Executes a threshold event for the complete group before a one-shot zone is disabled. */
+    private static int fireGroup(Zone zone, MinecraftServer server, Collection<ServerPlayerEntity> players) {
+        if (!zone.enabled || players == null || players.isEmpty()) return 0;
+        int count = 0;
+        for (ServerPlayerEntity player : players) {
+            if (!isRuntimePlayer(player)) continue;
+            execute(zone, server, player);
+            count++;
         }
+        if (count > 0 && zone.once) disableAfterOnce(zone, server);
+        return count;
+    }
+
+    private static void disableAfterOnce(Zone zone, MinecraftServer server) {
+        zone.enabled = false;
+        resetRuntimeState(zone.id);
+        save(server);
+    }
+
+    private static List<ServerPlayerEntity> onlinePlayers(MinecraftServer server, Collection<UUID> uuids) {
+        List<ServerPlayerEntity> out = new ArrayList<>();
+        if (uuids == null) return out;
+        for (UUID uuid : uuids) {
+            ServerPlayerEntity player = server.getPlayerManager().getPlayer(uuid);
+            if (isRuntimePlayer(player)) out.add(player);
+        }
+        return out;
+    }
+
+    private static boolean isRuntimePlayer(ServerPlayerEntity player) {
+        return player != null && player.isAlive() && !player.isSpectator();
+    }
+
+    private static void resetRuntimeState(String id) {
+        INSIDE.remove(id);
+        LAST_FIRE.remove(id);
+        LAST_GROUP_FIRE.remove(id);
     }
 
     private static void execute(Zone zone, MinecraftServer server, ServerPlayerEntity player) {
@@ -230,6 +332,7 @@ public final class TriggerZoneManager {
         zone.command = normalizeCommand(zone.command);
         zone.mode = zone.mode == null ? Mode.ENTER : zone.mode;
         zone.cooldownTicks = Math.max(0, Math.min(72_000, zone.cooldownTicks));
+        zone.minPlayers = TriggerOccupancyPolicy.minimum(zone.minPlayers);
         return zone;
     }
 
@@ -265,6 +368,7 @@ public final class TriggerZoneManager {
         public String command = "";
         public Mode mode = Mode.ENTER;
         public int cooldownTicks = 10;
+        public int minPlayers = 1;
         public boolean once;
         public boolean enabled = true;
 
