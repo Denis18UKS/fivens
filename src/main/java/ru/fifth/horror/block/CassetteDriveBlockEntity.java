@@ -1,13 +1,10 @@
 package ru.fifth.horror.block;
 
-import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
-import net.minecraft.network.PacketByteBuf;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
@@ -16,11 +13,11 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
 import net.minecraft.world.World;
 import ru.fifth.horror.FifthMod;
-import ru.fifth.horror.cutscene.CutsceneManager;
 import ru.fifth.horror.item.VhsCassetteItem;
-import ru.fifth.horror.network.FifthNetworking;
+import ru.fifth.horror.vhs.VhsRecordingFeature;
+import ru.fifth.horror.vhs.VhsRecordingStore;
 
-/** VHS drive: 1.5s physical insert -> short signal/static lock -> recorded TV playback OR malfunction -> eject. */
+/** VHS drive: 1.5s insert -> signal/static lock -> immutable stored-frame TV playback OR reject/eject. */
 public final class CassetteDriveBlockEntity extends BlockEntity {
     public static final int INSERT_TICKS = 30;
     public static final int FAIL_TICKS = 46;
@@ -73,7 +70,9 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
 
         if (be.phase == 1) {
             String rec = VhsCassetteItem.recording(be.cassette);
-            boolean invalid = be.reject || rec.isBlank() || CutsceneManager.load(sw.getServer(), rec) == null || !be.hasValidTv(sw);
+            boolean invalid = be.reject || rec.isBlank()
+                    || !VhsRecordingFeature.store(sw.getServer()).isComplete(rec)
+                    || !be.hasValidTv(sw);
             if (invalid) {
                 be.reject = true;
                 be.phase = 2;
@@ -108,8 +107,8 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
 
     private void startPlayback(ServerWorld sw, String rec) {
         if (tvPos == null || !(sw.getBlockEntity(tvPos) instanceof TelevisionBlockEntity tv)) return;
-        String json = CutsceneManager.json(sw.getServer(), rec);
-        if (json.isBlank()) {
+        VhsRecordingStore.Metadata metadata = VhsRecordingFeature.store(sw.getServer()).metadata(rec);
+        if (metadata == null) {
             reject = true;
             phase = 2;
             timer = FAIL_TICKS;
@@ -119,15 +118,11 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
 
         tv.start(rec);
         Box box = new Box(tvPos).expand(64);
-        for (ServerPlayerEntity p : sw.getEntitiesByClass(ServerPlayerEntity.class, box, x -> true)) {
-            PacketByteBuf buf = PacketByteBufs.create();
-            buf.writeString(json, 1_000_000);
-            buf.writeVarInt(1);
-            buf.writeBlockPos(tvPos);
-            ServerPlayNetworking.send(p, FifthNetworking.VHS_PLAYBACK, buf);
+        for (ServerPlayerEntity player : sw.getEntitiesByClass(ServerPlayerEntity.class, box, x -> true)) {
+            VhsRecordingFeature.sendPlaybackStart(player, tvPos, metadata);
         }
 
-        // Startup interference belongs only to signal lock (~1.5 s) and now has an audible analogue hiss/click.
+        // Startup interference belongs only to the 1.5s signal lock and has an audible analogue hiss/click.
         sw.playSound(null, tvPos, SoundEvents.BLOCK_FIRE_AMBIENT, SoundCategory.BLOCKS, .72f, .62f);
         sw.playSound(null, tvPos, SoundEvents.BLOCK_NOTE_BLOCK_HAT.value(), SoundCategory.BLOCKS, .32f, .48f);
         markDirty();
