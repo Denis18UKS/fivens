@@ -15,7 +15,10 @@
       "ru.fifth.horror.TvTestCommands",
       "ru.fifth.horror.TriggerZoneFeature"
     ],
-    "client": ["ru.fifth.horror.client.FifthClient"]
+    "client": [
+      "ru.fifth.horror.client.FifthClient",
+      "ru.fifth.horror.client.TriggerZoneVisualizationClient"
+    ]
   },
   "mixins": ["fifth.mixins.json"],
   "depends": {
