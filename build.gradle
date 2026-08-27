@@ -26,18 +26,7 @@ apply plugin: 'fabric-loom'
 
 loom {
     mixin {
-        /*
-         * Нам нужен настоящий refmap, потому что fifth.mixins.json
-         * ссылается на:
-         *
-         * Fifth-Horror-Engine-refmap.json
-         *
-         * Без него в production Minecraft видит intermediary-
-         * имена типа class_437 / method_25420, а mixin пытается
-         * найти буквальное renderBackground.
-         */
         useLegacyMixinAp = true
-
         defaultRefmapName = "Fifth-Horror-Engine-refmap.json"
     }
 }
@@ -79,14 +68,25 @@ repositories {
 
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
-
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-
     modImplementation "software.bernie.geckolib:geckolib-fabric-${project.minecraft_version}:${project.geckolib_version}"
+
+    // Real VHS media engine. Only the JavaCV/JavaCPP/FFmpeg pieces that Fiven actually uses are bundled.
+    // The native classifier intentionally targets the project's current Windows x86_64 client platform.
+    implementation('org.bytedeco:javacv:1.5.14') { transitive = false }
+    include('org.bytedeco:javacv:1.5.14') { transitive = false }
+
+    implementation('org.bytedeco:javacpp:1.5.14') { transitive = false }
+    include('org.bytedeco:javacpp:1.5.14') { transitive = false }
+    implementation('org.bytedeco:javacpp:1.5.14:windows-x86_64') { transitive = false }
+    include('org.bytedeco:javacpp:1.5.14:windows-x86_64') { transitive = false }
+
+    implementation('org.bytedeco:ffmpeg:8.1.2-1.5.14') { transitive = false }
+    include('org.bytedeco:ffmpeg:8.1.2-1.5.14') { transitive = false }
+    implementation('org.bytedeco:ffmpeg:8.1.2-1.5.14:windows-x86_64') { transitive = false }
+    include('org.bytedeco:ffmpeg:8.1.2-1.5.14:windows-x86_64') { transitive = false }
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
 }
