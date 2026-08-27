@@ -4,11 +4,14 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.minecraft.text.Text;
 import ru.fifth.horror.vhs.VhsRecordingFeature;
 import ru.fifth.horror.vhs.VhsRecordingPolicy;
 
 /** Registers the authoring recorder and immutable stored-frame TV playback on the client. */
 public final class VhsRecordingClient implements ClientModInitializer {
+    private boolean wasInWorld;
+
     @Override
     public void onInitializeClient() {
         ClientPlayNetworking.registerGlobalReceiver(VhsRecordingFeature.RECORD_ACK, (client, handler, buf, sender) -> {
@@ -50,14 +53,24 @@ public final class VhsRecordingClient implements ClientModInitializer {
 
         ClientPlayNetworking.registerGlobalReceiver(VhsRecordingFeature.TV_DIAGNOSTIC, (client, handler, buf, sender) -> {
             var tvPos = buf.readBlockPos();
-            client.execute(() -> VhsRecordedPlayback.startDiagnostic(tvPos));
+            client.execute(() -> {
+                VhsRecordedPlayback.startDiagnostic(tvPos);
+                if (client.player != null) {
+                    client.player.sendMessage(Text.literal("§8[§cFiven§8] §7TV TEST получен клиентом: проверяю CRT."), true);
+                }
+            });
         });
 
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> VhsRecorderClient.captureNext(tickDelta));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             VhsRecorderClient.tick();
             VhsRecordedPlayback.tick();
-            if (client.world == null) VhsRecordedPlayback.clear();
+            boolean inWorld = client.world != null;
+            if (!inWorld && wasInWorld) {
+                VhsRecordedPlayback.clear();
+                VhsSignalTexture.clear();
+            }
+            wasInWorld = inWorld;
         });
     }
 }
