@@ -6,8 +6,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class LiftTravelHudPolicyTest {
     @Test
-    void activeLiftOwnsFinalHudPassEvenWhenCutsceneWouldHideHud() {
-        assertFalse(LiftTravelHudPolicy.cancelVanillaHud(true, true));
+    void activeLiftSuppressesVanillaHudBecauseItRendersFromGameRendererFinalPass() {
+        assertTrue(LiftTravelHudPolicy.cancelVanillaHud(true, true));
+        assertTrue(LiftTravelHudPolicy.cancelVanillaHud(false, true));
         assertTrue(LiftTravelHudPolicy.cancelVanillaHud(true, false));
         assertFalse(LiftTravelHudPolicy.cancelVanillaHud(false, false));
     }
