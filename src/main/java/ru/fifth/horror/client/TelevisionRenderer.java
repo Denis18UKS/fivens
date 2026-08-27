@@ -18,14 +18,23 @@ import org.joml.Matrix4f;
 import ru.fifth.horror.block.TelevisionBlock;
 import ru.fifth.horror.block.TelevisionBlockEntity;
 
-import java.util.Random;
+import java.util.HashMap;
+import java.util.Map;
 
 /** Physical CRT overlay. Tape playback consumes immutable recorded PNG frames only. */
 public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionBlockEntity> {
     private static final float SCREEN_HALF = 7.0f / 16.0f;
+    /** Keep the CRT plane clearly in front of the vanilla block face to avoid depth fighting. */
+    private static final double SCREEN_EPSILON = 0.012;
     private static final int SCREEN_LIGHT = 0x00F000F0;
+    private static final Map<Long, Long> DISPATCH_HITS = new HashMap<>();
 
     public TelevisionRenderer(BlockEntityRendererFactory.Context ignored) {}
+
+    /** Called by the dispatcher mixin as a lightweight render-path heartbeat. */
+    public static void noteDispatcherHit(TelevisionBlockEntity be) {
+        if (be != null) DISPATCH_HITS.put(be.getPos().asLong(), System.nanoTime());
+    }
 
     @Override
     public void render(TelevisionBlockEntity be, float delta, MatrixStack ms, VertexConsumerProvider vertices, int light, int overlay) {
@@ -49,7 +58,15 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         String tapeError = hasSession ? VhsRecordedPlayback.error(pos) : "";
         boolean recordingPhase = hasSession && VhsRecordedPlayback.recordingPhase(pos);
         Identifier captured = recordingPhase && tapeError.isBlank() ? VhsRecordedPlayback.texture(pos) : null;
-        if (!startupStatic && captured != null) drawVideoQuad(ms, vertices, captured, SCREEN_LIGHT);
+
+        // Startup snow is now a real texture quad, using exactly the same GPU path as recorded VHS frames.
+        if (startupStatic) {
+            long tick = be.getWorld() == null ? 0L : be.getWorld().getTime();
+            Identifier signal = VhsSignalTexture.texture(pos, tick);
+            if (signal != null) drawVideoQuad(ms, vertices, signal, SCREEN_LIGHT);
+        } else if (captured != null) {
+            drawVideoQuad(ms, vertices, captured, SCREEN_LIGHT);
+        }
 
         float overlayScale = (SCREEN_HALF * 2.0f) / 108.0f;
         ms.scale(overlayScale, -overlayScale, overlayScale);
@@ -58,19 +75,8 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         int y = -43;
 
         if (startupStatic) {
-            drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
-            long seed = (be.getWorld() == null ? 0 : be.getWorld().getTime()) * 31L + be.getPos().asLong();
-            Random random = new Random(seed);
-            String chars = " ░▒▓";
-            for (int row = 0; row < 12; row++) {
-                StringBuilder line = new StringBuilder();
-                for (int col = 0; col < 18; col++) line.append(chars.charAt(random.nextInt(chars.length())));
-                int greyValue = 80 + random.nextInt(145);
-                int grey = 0xFF000000 | (greyValue << 16) | (greyValue << 8) | greyValue;
-                text.draw(line.toString(), x, y + 4 + row * 7, grey, false, matrix, vertices,
-                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
-            }
-            text.draw("VHS TRACKING...", -39, -4, 0xFFF0F0F0, false, matrix, vertices,
+            // The picture itself is the animated signal texture; text is only a small optional overlay.
+            text.draw("VHS TRACKING...", -39, -4, 0xFFF4F4F4, false, matrix, vertices,
                     TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
         } else if (!tapeError.isBlank()) {
             drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
@@ -104,18 +110,18 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
     private static void orientToPhysicalFront(MatrixStack ms, Direction facing) {
         switch (facing) {
             case SOUTH -> {
-                ms.translate(.5, .5, 1.0015);
+                ms.translate(.5, .5, 1.0 + SCREEN_EPSILON);
                 ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(180f));
             }
             case EAST -> {
-                ms.translate(1.0015, .5, .5);
+                ms.translate(1.0 + SCREEN_EPSILON, .5, .5);
                 ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-90f));
             }
             case WEST -> {
-                ms.translate(-.0015, .5, .5);
+                ms.translate(-SCREEN_EPSILON, .5, .5);
                 ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(90f));
             }
-            default -> ms.translate(.5, .5, -.0015);
+            default -> ms.translate(.5, .5, -SCREEN_EPSILON);
         }
     }
 
