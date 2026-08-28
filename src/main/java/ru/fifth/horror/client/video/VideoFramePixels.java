@@ -1,5 +1,6 @@
 package ru.fifth.horror.client.video;
 
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 /**
@@ -31,6 +32,23 @@ public final class VideoFramePixels {
             }
         }
         return argb;
+    }
+
+    /** Converts Minecraft-style ARGB integers to a tightly packed RGBA byte buffer. */
+    public static ByteBuffer argbToRgbaBuffer(int[] argb, int width, int height) {
+        if (argb == null || width <= 0 || height <= 0 || argb.length < width * height) {
+            throw new IllegalArgumentException("Invalid ARGB frame");
+        }
+        ByteBuffer rgba = ByteBuffer.allocate(Math.multiplyExact(Math.multiplyExact(width, height), 4));
+        for (int i = 0; i < width * height; i++) {
+            int color = argb[i];
+            rgba.put((byte) ((color >>> 16) & 0xFF));
+            rgba.put((byte) ((color >>> 8) & 0xFF));
+            rgba.put((byte) (color & 0xFF));
+            rgba.put((byte) ((color >>> 24) & 0xFF));
+        }
+        rgba.flip();
+        return rgba;
     }
 
     /** Letterboxes an ARGB frame into the CRT's fixed output size without changing channel order. */
