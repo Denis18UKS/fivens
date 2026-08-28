@@ -39,7 +39,6 @@ public final class VideoPlayerSession implements AutoCloseable {
     private Thread decodeThread;
     private NativeImageBackedTexture texture;
     private Identifier textureId;
-    /** Latest media-time frame selected on the client tick; uploaded only if/when the TV is rendered. */
     private DecodedFrame pendingFrame;
 
     public VideoPlayerSession(VideoAssetStore.Metadata metadata, BlockPos tvPos) {
@@ -93,11 +92,6 @@ public final class VideoPlayerSession implements AutoCloseable {
         }
     }
 
-    /**
-     * Advances decode consumption even when the TV is outside the camera frustum. This prevents the
-     * bounded video queue from blocking FFmpeg (and therefore positional audio) just because the
-     * player looked away from the screen.
-     */
     private void advanceVideo(long dueMicros) {
         DecodedFrame newest = null;
         while (true) {
@@ -136,8 +130,6 @@ public final class VideoPlayerSession implements AutoCloseable {
         FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(media.toFile());
         try {
             grabber.setSampleMode(FrameGrabber.SampleMode.SHORT);
-            // The previous Java2D conversion path produced platform-dependent channel corruption on Windows.
-            // Force one explicit FFmpeg output layout and copy RGBA bytes ourselves instead.
             grabber.setPixelFormat(avutil.AV_PIX_FMT_RGBA);
             if (metadata.hasAudio()) grabber.setAudioChannels(Math.min(2, Math.max(1, metadata.audioChannels())));
             grabber.start();
@@ -216,30 +208,28 @@ public final class VideoPlayerSession implements AutoCloseable {
         return new short[0];
     }
 
+    /**
+     * Upload the decoded frame through Minecraft's own RGBA NativeImage decoder instead of manually
+     * packing NativeImage's ABGR integer representation. This removes the last platform/packing
+     * ambiguity between FFmpeg's RGBA bytes and the OpenGL texture used by the CRT.
+     */
     private void install(DecodedFrame frame) {
         MinecraftClient client = MinecraftClient.getInstance();
         try {
+            ByteBuffer rgba = VideoFramePixels.argbToRgbaBuffer(frame.argb, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+            NativeImage nextImage = NativeImage.read(NativeImage.Format.RGBA, rgba);
+
             if (texture == null) {
-                texture = new NativeImageBackedTexture(OUTPUT_WIDTH, OUTPUT_HEIGHT, false);
+                texture = new NativeImageBackedTexture(nextImage);
                 textureId = client.getTextureManager().registerDynamicTexture(
                         "fiven_video_" + Long.toUnsignedString(tvPos.asLong()), texture);
-            }
-            NativeImage image = texture.getImage();
-            if (image == null) {
-                fail("TAPE READ ERROR: dynamic texture unavailable");
+                texture.upload();
                 return;
             }
-            for (int y = 0, index = 0; y < OUTPUT_HEIGHT; y++) {
-                for (int x = 0; x < OUTPUT_WIDTH; x++, index++) {
-                    int argb = frame.argb[index];
-                    int a = (argb >>> 24) & 0xFF;
-                    int r = (argb >>> 16) & 0xFF;
-                    int g = (argb >>> 8) & 0xFF;
-                    int b = argb & 0xFF;
-                    // NativeImage stores RGBA bytes in little-endian ABGR ints.
-                    image.setColor(x, y, (a << 24) | (b << 16) | (g << 8) | r);
-                }
-            }
+
+            NativeImage previous = texture.getImage();
+            texture.setImage(nextImage);
+            if (previous != null) previous.close();
             texture.upload();
         } catch (Throwable uploadError) {
             fail("TAPE READ ERROR: GPU upload — " + concise(uploadError));
