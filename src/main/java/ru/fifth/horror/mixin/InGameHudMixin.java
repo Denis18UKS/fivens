@@ -9,12 +9,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import ru.fifth.horror.client.CutscenePlayback;
 import ru.fifth.horror.client.LiftTravelHudPolicy;
 import ru.fifth.horror.client.LiftTravelOverlay;
+import ru.fifth.horror.client.ScreamerOverlay;
 
-/** Ordinary HUD suppression only. Lift graphics themselves render from GameRenderer, outside F1. */
+/** Keeps authored lift/cutscene suppression while forcing the screamer above F1. */
 @Mixin(InGameHud.class)
 public class InGameHudMixin {
     @Inject(method = "render", at = @At("HEAD"), cancellable = true)
     private void fifth$hide(DrawContext context, float tickDelta, CallbackInfo ci) {
+        if (ScreamerOverlay.active()) {
+            ScreamerOverlay.render(context);
+            ci.cancel();
+            return;
+        }
         if (LiftTravelHudPolicy.cancelVanillaHud(CutscenePlayback.hideHud(), LiftTravelOverlay.active())) {
             ci.cancel();
         }
