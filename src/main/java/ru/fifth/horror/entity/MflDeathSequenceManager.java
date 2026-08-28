@@ -8,6 +8,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.GameMode;
 import ru.fifth.horror.FifthMod;
 import ru.fifth.horror.checkpoint.CheckpointManager;
 import ru.fifth.horror.cutscene.CutsceneDefinition;
@@ -17,7 +18,7 @@ import ru.fifth.horror.mixin.MonsterForLiftRuntimeAccess;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Owns the real catch -> one-shot screamer -> death scene -> checkpoint restart sequence. */
+/** Owns the real Adventure-only catch -> screamer -> death -> checkpoint sequence. */
 public final class MflDeathSequenceManager {
     public static final Identifier CAPTURE_LOCK = FifthMod.id("mfl_capture_lock");
     private static final String DEFAULT_DEATH_SCENE = "mfl_death";
@@ -27,6 +28,7 @@ public final class MflDeathSequenceManager {
 
     public static boolean begin(MonsterForLiftEntity mfl, ServerPlayerEntity victim) {
         if (mfl == null || victim == null || victim.isCreative() || victim.isSpectator() || !victim.isAlive()) return false;
+        if (victim.interactionManager == null || victim.interactionManager.getGameMode() != GameMode.ADVENTURE) return false;
         if (!(mfl.getWorld() instanceof ServerWorld world) || victim.getServerWorld() != world) return false;
         if (SESSIONS.containsKey(mfl.getUuid())) return true;
         for (Session s : SESSIONS.values()) if (victim.getUuid().equals(s.victimId)) return true;
@@ -42,7 +44,7 @@ public final class MflDeathSequenceManager {
 
         mfl.getNavigation().stop();
         mfl.setVelocity(Vec3d.ZERO);
-        mfl.triggerScreamer(victim); // one-shot GeckoLib action + audiovisual screamer
+        mfl.triggerScreamer(victim);
         lock(victim, true);
         if (scene != null) CutsceneManager.play(server, DEFAULT_DEATH_SCENE, victim);
         return true;
@@ -60,7 +62,6 @@ public final class MflDeathSequenceManager {
                 continue;
             }
 
-            // Victim remains physically caught until the authoritative death timer resolves.
             victim.teleport(victim.getServerWorld(), session.capturePos.x, session.capturePos.y, session.capturePos.z,
                     session.captureYaw, session.capturePitch);
             victim.setVelocity(Vec3d.ZERO);
@@ -69,7 +70,7 @@ public final class MflDeathSequenceManager {
             MonsterForLiftRuntimeAccess access = (MonsterForLiftRuntimeAccess) (Object) mfl;
             mfl.getNavigation().stop();
             mfl.setVelocity(Vec3d.ZERO);
-            access.fiven$setManualAnimationTicks(2); // keeps authored LOGICAL/SCRIPTED AI suspended
+            access.fiven$setManualAnimationTicks(2);
             session.elapsed++;
             if (session.elapsed >= 10) access.fiven$setCurrentAnimation("mfl_screamer_hold");
 
@@ -80,10 +81,10 @@ public final class MflDeathSequenceManager {
             releaseMfl(mfl);
             SESSIONS.remove(session.mflId);
 
+            // A successful grab is a real death. Checkpoint restart remains a post-death convenience.
+            victim.kill();
             if (CheckpointManager.isGameRunning(server) && CheckpointManager.current(server) != null) {
                 CheckpointManager.restart(server);
-            } else {
-                victim.damage(victim.getDamageSources().generic(), Float.MAX_VALUE);
             }
         }
     }
