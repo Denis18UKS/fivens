@@ -9,6 +9,7 @@
     "MonsterForLiftRuntimeAccess",
     "MonsterForLiftRuntimeMixin",
     "MonsterForLiftDeathMixin",
+    "MonsterForLiftCaptureGateMixin",
     "MonsterForLiftAggressionMixin"
   ],
   "client": [
