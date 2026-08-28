@@ -18,10 +18,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
-/**
- * Streams decoded VHS PCM through Minecraft's existing SoundSystem/OpenAL context.
- * A second native OpenAL device/context is deliberately never created; that was unsafe on Windows.
- */
+/** Streams decoded VHS PCM through Minecraft's existing SoundSystem/OpenAL context. */
 public final class PositionalVideoAudio implements AutoCloseable {
     private VideoStream stream;
     private VideoSound sound;
@@ -63,7 +60,7 @@ public final class PositionalVideoAudio implements AutoCloseable {
         private final VideoStream stream;
 
         private VideoSound(VideoStream stream) {
-            super(SoundEvents.BLOCK_NOTE_BLOCK_HARP, SoundCategory.BLOCKS, SoundInstance.createRandom());
+            super(SoundEvents.BLOCK_NOTE_BLOCK_HARP.value(), SoundCategory.BLOCKS, SoundInstance.createRandom());
             this.stream = stream;
             this.repeat = false;
             this.volume = 1f;
