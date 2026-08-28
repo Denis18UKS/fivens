@@ -1,171 +1,149 @@
 package ru.fifth.horror.client.video;
 
+import net.fabricmc.fabric.api.client.sound.v1.FabricSoundInstance;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.sound.AudioStream;
+import net.minecraft.client.sound.MovingSoundInstance;
+import net.minecraft.client.sound.SoundLoader;
+import net.minecraft.client.sound.SoundInstance;
 import net.minecraft.sound.SoundCategory;
+import net.minecraft.sound.SoundEvents;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import org.lwjgl.BufferUtils;
-import org.lwjgl.openal.AL;
-import org.lwjgl.openal.AL10;
-import org.lwjgl.openal.ALC;
-import org.lwjgl.openal.ALC10;
-import org.lwjgl.openal.ALCCapabilities;
 
+import javax.sound.sampled.AudioFormat;
+import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.FloatBuffer;
-import java.nio.IntBuffer;
-import java.nio.ShortBuffer;
-import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Dedicated OpenAL stream for media audio. A separate context keeps FFmpeg PCM handling out of
- * Minecraft's private sound-engine internals while still giving the TV a true positional source.
+ * Streams decoded VHS PCM through Minecraft's existing SoundSystem/OpenAL context.
+ * A second native OpenAL device/context is deliberately never created; that was unsafe on Windows.
  */
 public final class PositionalVideoAudio implements AutoCloseable {
-    private static final Engine ENGINE = new Engine();
-
-    private final AtomicInteger source = new AtomicInteger();
+    private VideoStream stream;
+    private VideoSound sound;
     private volatile boolean closed;
 
-    public PositionalVideoAudio() {
-        ENGINE.submit(() -> {
-            if (!ENGINE.ready || closed) return;
-            int id = AL10.alGenSources();
-            AL10.alSourcei(id, AL10.AL_SOURCE_RELATIVE, AL10.AL_FALSE);
-            AL10.alSourcef(id, AL10.AL_REFERENCE_DISTANCE, 4.0f);
-            AL10.alSourcef(id, AL10.AL_MAX_DISTANCE, 64.0f);
-            AL10.alSourcef(id, AL10.AL_ROLLOFF_FACTOR, 1.0f);
-            source.set(id);
-        });
-    }
-
-    public void queue(short[] pcm, int channels, int sampleRate) {
+    public synchronized void queue(short[] pcm, int channels, int sampleRate) {
         if (closed || pcm == null || pcm.length == 0 || sampleRate <= 0) return;
-        final int normalizedChannels = channels <= 1 ? 1 : 2;
-        ENGINE.submit(() -> {
-            int id = source.get();
-            if (!ENGINE.ready || id == 0 || closed) return;
-            cleanupProcessed(id);
-            int buffer = AL10.alGenBuffers();
-            ShortBuffer samples = BufferUtils.createShortBuffer(pcm.length);
-            samples.put(pcm).flip();
-            int format = normalizedChannels == 1 ? AL10.AL_FORMAT_MONO16 : AL10.AL_FORMAT_STEREO16;
-            AL10.alBufferData(buffer, format, samples, sampleRate);
-            AL10.alSourceQueueBuffers(id, buffer);
-            int state = AL10.alGetSourcei(id, AL10.AL_SOURCE_STATE);
-            if (state != AL10.AL_PLAYING && AL10.alGetSourcei(id, AL10.AL_BUFFERS_QUEUED) >= 2) {
-                AL10.alSourcePlay(id);
-            }
-        });
+        int normalizedChannels = channels <= 1 ? 1 : 2;
+        if (stream == null) {
+            stream = new VideoStream(normalizedChannels, sampleRate);
+            sound = new VideoSound(stream);
+            MinecraftClient.getInstance().execute(() -> {
+                if (!closed && sound != null) MinecraftClient.getInstance().getSoundManager().play(sound);
+            });
+        }
+        stream.enqueue(pcm, normalizedChannels, sampleRate);
     }
 
-    /** Called on the Minecraft client thread; only immutable scalar values cross into the audio thread. */
     public void update(BlockPos tvPos) {
-        if (closed || tvPos == null) return;
+        if (closed || sound == null || tvPos == null) return;
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.world == null) return;
-        Vec3d listener = client.gameRenderer.getCamera().getPos();
-        float yaw = client.gameRenderer.getCamera().getYaw();
-        float pitch = client.gameRenderer.getCamera().getPitch();
-        double yawRad = Math.toRadians(yaw);
-        double pitchRad = Math.toRadians(pitch);
-        float fx = (float) (-Math.sin(yawRad) * Math.cos(pitchRad));
-        float fy = (float) (-Math.sin(pitchRad));
-        float fz = (float) (Math.cos(yawRad) * Math.cos(pitchRad));
-        float blocks = client.options.getSoundVolume(SoundCategory.BLOCKS);
-        float master = client.options.getSoundVolume(SoundCategory.MASTER);
-        float gain = Math.max(0.0f, Math.min(1.0f, blocks * master));
-        float sx = tvPos.getX() + 0.5f, sy = tvPos.getY() + 0.5f, sz = tvPos.getZ() + 0.5f;
-        float lx = (float) listener.x, ly = (float) listener.y, lz = (float) listener.z;
-
-        ENGINE.submit(() -> {
-            int id = source.get();
-            if (!ENGINE.ready || id == 0 || closed) return;
-            cleanupProcessed(id);
-            AL10.alSource3f(id, AL10.AL_POSITION, sx, sy, sz);
-            AL10.alSourcef(id, AL10.AL_GAIN, gain);
-            AL10.alListener3f(AL10.AL_POSITION, lx, ly, lz);
-            FloatBuffer orientation = BufferUtils.createFloatBuffer(6);
-            orientation.put(fx).put(fy).put(fz).put(0f).put(1f).put(0f).flip();
-            AL10.alListenerfv(AL10.AL_ORIENTATION, orientation);
-        });
+        float volume = Math.max(0f, Math.min(1f,
+                client.options.getSoundVolume(SoundCategory.BLOCKS) * client.options.getSoundVolume(SoundCategory.MASTER)));
+        sound.setPosition(tvPos.getX() + .5f, tvPos.getY() + .5f, tvPos.getZ() + .5f);
+        sound.setVolume(volume);
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         if (closed) return;
         closed = true;
-        ENGINE.submit(() -> {
-            int id = source.getAndSet(0);
-            if (!ENGINE.ready || id == 0) return;
-            AL10.alSourceStop(id);
-            cleanupAll(id);
-            AL10.alDeleteSources(id);
-        });
+        if (stream != null) stream.close();
+        if (sound != null) MinecraftClient.getInstance().execute(sound::finish);
+        stream = null;
+        sound = null;
     }
 
-    private static void cleanupProcessed(int source) {
-        int processed = AL10.alGetSourcei(source, AL10.AL_BUFFERS_PROCESSED);
-        while (processed-- > 0) {
-            int buffer = AL10.alSourceUnqueueBuffers(source);
-            if (buffer != 0) AL10.alDeleteBuffers(buffer);
-        }
-    }
+    private static final class VideoSound extends MovingSoundInstance implements FabricSoundInstance {
+        private final VideoStream stream;
 
-    private static void cleanupAll(int source) {
-        cleanupProcessed(source);
-        int queued = AL10.alGetSourcei(source, AL10.AL_BUFFERS_QUEUED);
-        while (queued-- > 0) {
-            int buffer = AL10.alSourceUnqueueBuffers(source);
-            if (buffer != 0) AL10.alDeleteBuffers(buffer);
-        }
-    }
-
-    private static final class Engine implements Runnable {
-        private final BlockingQueue<Runnable> commands = new LinkedBlockingQueue<>();
-        private final Thread thread;
-        private volatile boolean ready;
-
-        Engine() {
-            thread = new Thread(this, "Fiven-Video-Audio");
-            thread.setDaemon(true);
-            thread.start();
-        }
-
-        void submit(Runnable command) {
-            if (command != null) commands.offer(command);
+        private VideoSound(VideoStream stream) {
+            super(SoundEvents.BLOCK_NOTE_BLOCK_HARP, SoundCategory.BLOCKS, SoundInstance.createRandom());
+            this.stream = stream;
+            this.repeat = false;
+            this.volume = 1f;
+            this.pitch = 1f;
+            this.attenuationType = SoundInstance.AttenuationType.LINEAR;
         }
 
         @Override
-        public void run() {
-            long device = 0L;
-            long context = 0L;
-            try {
-                device = ALC10.alcOpenDevice((ByteBuffer) null);
-                if (device == 0L) return;
-                ALCCapabilities capabilities = ALC.createCapabilities(device);
-                context = ALC10.alcCreateContext(device, (IntBuffer) null);
-                if (context == 0L || !ALC10.alcMakeContextCurrent(context)) return;
-                AL.createCapabilities(capabilities);
-                ready = true;
-                while (!Thread.currentThread().isInterrupted()) {
-                    Runnable command = commands.take();
-                    try { command.run(); } catch (Throwable ignored) {}
-                }
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-            } catch (Throwable ignored) {
-                ready = false;
-            } finally {
-                ready = false;
-                if (context != 0L) {
-                    try { ALC10.alcMakeContextCurrent(0L); } catch (Throwable ignored) {}
-                    try { ALC10.alcDestroyContext(context); } catch (Throwable ignored) {}
-                }
-                if (device != 0L) try { ALC10.alcCloseDevice(device); } catch (Throwable ignored) {}
-            }
+        public CompletableFuture<AudioStream> getAudioStream(SoundLoader loader, Identifier id, boolean repeatInstantly) {
+            return CompletableFuture.completedFuture(stream);
         }
+
+        @Override
+        public void tick() {
+            if (stream.isClosed()) setDone();
+        }
+
+        private void setPosition(float x, float y, float z) { this.x = x; this.y = y; this.z = z; }
+        private void setVolume(float volume) { this.volume = volume; }
+        private void finish() { stream.close(); setDone(); }
+    }
+
+    private static final class VideoStream implements AudioStream {
+        private final int channels;
+        private final int sampleRate;
+        private final AudioFormat format;
+        private final LinkedBlockingQueue<byte[]> chunks = new LinkedBlockingQueue<>();
+        private volatile boolean closed;
+
+        private VideoStream(int channels, int sampleRate) {
+            this.channels = channels;
+            this.sampleRate = sampleRate;
+            this.format = new AudioFormat(sampleRate, 16, channels, true, false);
+        }
+
+        private void enqueue(short[] pcm, int channels, int sampleRate) {
+            if (closed || channels != this.channels || sampleRate != this.sampleRate) return;
+            byte[] bytes = new byte[pcm.length * 2];
+            for (int i = 0; i < pcm.length; i++) {
+                short s = pcm[i];
+                bytes[i * 2] = (byte) (s & 0xFF);
+                bytes[i * 2 + 1] = (byte) ((s >>> 8) & 0xFF);
+            }
+            chunks.offer(bytes);
+        }
+
+        @Override
+        public AudioFormat getFormat() { return format; }
+
+        @Override
+        public ByteBuffer getBuffer(int size) throws IOException {
+            if (closed && chunks.isEmpty()) return ByteBuffer.allocate(0);
+            ByteBuffer out = ByteBuffer.allocate(Math.max(1, size));
+            while (out.hasRemaining()) {
+                byte[] chunk;
+                try {
+                    chunk = chunks.poll(250, TimeUnit.MILLISECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("VHS audio stream interrupted", e);
+                }
+                if (chunk == null) {
+                    if (closed) break;
+                    continue;
+                }
+                int copy = Math.min(out.remaining(), chunk.length);
+                out.put(chunk, 0, copy);
+                if (copy < chunk.length) {
+                    byte[] rest = new byte[chunk.length - copy];
+                    System.arraycopy(chunk, copy, rest, 0, rest.length);
+                    chunks.offer(rest);
+                }
+            }
+            out.flip();
+            return out;
+        }
+
+        private boolean isClosed() { return closed; }
+
+        @Override
+        public void close() { closed = true; chunks.clear(); }
     }
 }
