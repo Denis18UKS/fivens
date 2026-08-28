@@ -5,7 +5,6 @@ import net.minecraft.client.texture.NativeImage;
 import net.minecraft.client.texture.NativeImageBackedTexture;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
-import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.FFmpegFrameGrabber;
 import org.bytedeco.javacv.Frame;
 import org.bytedeco.javacv.FrameGrabber;
@@ -57,9 +56,9 @@ public final class VideoPlayerSession implements AutoCloseable {
 
     public void mediaReady(Path file) {
         if (!running || state != VideoPlaybackPolicy.State.PREPARING || file == null) return;
-        this.media = file;
-        this.staticTicks = 0;
-        this.state = VideoPlaybackPolicy.State.STATIC;
+        media = file;
+        staticTicks = 0;
+        state = VideoPlaybackPolicy.State.STATIC;
     }
 
     public void fail(String message) {
@@ -129,19 +128,21 @@ public final class VideoPlayerSession implements AutoCloseable {
     private void decodeLoop() {
         FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(media.toFile());
         try {
+            // Do not force pixel_format on avformat_open_input. For normal files JavaCV's COLOR mode
+            // already produces packed BGR24; forcing RGBA is an input option, gets rejected by FFmpeg
+            // for MP4/MKV and was the last native-crash trigger observed in the client log.
+            grabber.setImageMode(FrameGrabber.ImageMode.COLOR);
             grabber.setSampleMode(FrameGrabber.SampleMode.SHORT);
-            grabber.setPixelFormat(avutil.AV_PIX_FMT_RGBA);
             if (metadata.hasAudio()) grabber.setAudioChannels(Math.min(2, Math.max(1, metadata.audioChannels())));
             grabber.start();
             Frame frame;
             while (running && (frame = grabber.grab()) != null) {
                 long timestamp = Math.max(0L, frame.timestamp);
-                if (frame.image != null && frame.image.length > 0) {
-                    videoFrames.put(toDecodedFrame(frame, timestamp));
-                }
+                if (frame.image != null && frame.image.length > 0) videoFrames.put(toDecodedFrame(frame, timestamp));
                 if (audio != null && frame.samples != null && frame.samples.length > 0) {
-                    short[] pcm = copyPcm(frame.samples, Math.min(2, Math.max(1, frame.audioChannels)));
-                    if (pcm.length > 0) audio.queue(pcm, Math.min(2, Math.max(1, frame.audioChannels)), Math.max(1, frame.sampleRate));
+                    int channels = Math.min(2, Math.max(1, frame.audioChannels));
+                    short[] pcm = copyPcm(frame.samples, channels);
+                    if (pcm.length > 0) audio.queue(pcm, channels, Math.max(1, frame.sampleRate));
                 }
             }
             decoderDone = true;
@@ -159,30 +160,24 @@ public final class VideoPlayerSession implements AutoCloseable {
 
     private static DecodedFrame toDecodedFrame(Frame frame, long timestamp) {
         if (frame.image == null || frame.image.length == 0 || !(frame.image[0] instanceof ByteBuffer pixels)) {
-            throw new IllegalStateException("FFmpeg did not return RGBA8 bytes");
+            throw new IllegalStateException("FFmpeg did not return packed COLOR bytes");
         }
-        int width = frame.imageWidth;
-        int height = frame.imageHeight;
-        int stride = frame.imageStride;
-        if (width <= 0 || height <= 0 || stride <= 0 || frame.imageChannels != 4) {
-            throw new IllegalStateException("Unexpected FFmpeg RGBA layout: " + width + "x" + height
-                    + " channels=" + frame.imageChannels + " stride=" + stride);
+        int width = frame.imageWidth, height = frame.imageHeight, stride = frame.imageStride, channels = frame.imageChannels;
+        if (width <= 0 || height <= 0 || stride <= 0 || (channels != 3 && channels != 4)) {
+            throw new IllegalStateException("Unexpected FFmpeg image layout: " + width + "x" + height + " channels=" + channels + " stride=" + stride);
         }
-
-        int rowBytes = Math.multiplyExact(width, 4);
-        if (stride < rowBytes) throw new IllegalStateException("FFmpeg RGBA stride is too small");
+        int rowBytes = Math.multiplyExact(width, channels);
+        if (stride < rowBytes) throw new IllegalStateException("FFmpeg image stride is too small");
         int required = Math.addExact(Math.multiplyExact(height - 1, stride), rowBytes);
         ByteBuffer copy = pixels.duplicate();
         copy.rewind();
-        if (copy.remaining() < required) {
-            throw new IllegalStateException("FFmpeg RGBA buffer is truncated: " + copy.remaining() + " < " + required);
-        }
-        byte[] rgba = new byte[required];
-        copy.get(rgba);
-
-        int[] sourceArgb = VideoFramePixels.rgbaToArgb(rgba, width, height, stride);
-        int[] outputArgb = VideoFramePixels.letterboxNearest(sourceArgb, width, height, OUTPUT_WIDTH, OUTPUT_HEIGHT);
-        return new DecodedFrame(timestamp, outputArgb);
+        if (copy.remaining() < required) throw new IllegalStateException("FFmpeg image buffer is truncated: " + copy.remaining() + " < " + required);
+        byte[] bytes = new byte[required];
+        copy.get(bytes);
+        int[] sourceArgb = channels == 3
+                ? VideoFramePixels.bgrToArgb(bytes, width, height, stride)
+                : VideoFramePixels.rgbaToArgb(bytes, width, height, stride);
+        return new DecodedFrame(timestamp, VideoFramePixels.letterboxNearest(sourceArgb, width, height, OUTPUT_WIDTH, OUTPUT_HEIGHT));
     }
 
     private static short[] copyPcm(Buffer[] buffers, int channels) {
@@ -208,25 +203,17 @@ public final class VideoPlayerSession implements AutoCloseable {
         return new short[0];
     }
 
-    /**
-     * Upload the decoded frame through Minecraft's own RGBA NativeImage decoder instead of manually
-     * packing NativeImage's ABGR integer representation. This removes the last platform/packing
-     * ambiguity between FFmpeg's RGBA bytes and the OpenGL texture used by the CRT.
-     */
     private void install(DecodedFrame frame) {
         MinecraftClient client = MinecraftClient.getInstance();
         try {
             ByteBuffer rgba = VideoFramePixels.argbToRgbaBuffer(frame.argb, OUTPUT_WIDTH, OUTPUT_HEIGHT);
             NativeImage nextImage = NativeImage.read(NativeImage.Format.RGBA, rgba);
-
             if (texture == null) {
                 texture = new NativeImageBackedTexture(nextImage);
-                textureId = client.getTextureManager().registerDynamicTexture(
-                        "fiven_video_" + Long.toUnsignedString(tvPos.asLong()), texture);
+                textureId = client.getTextureManager().registerDynamicTexture("fiven_video_" + Long.toUnsignedString(tvPos.asLong()), texture);
                 texture.upload();
                 return;
             }
-
             NativeImage previous = texture.getImage();
             texture.setImage(nextImage);
             if (previous != null) previous.close();
