@@ -3,6 +3,7 @@ package ru.fifth.horror.entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.world.GameMode;
 import ru.fifth.horror.checkpoint.CheckpointManager;
 
 import java.util.Map;
@@ -20,7 +21,7 @@ public final class MflAggressionManager {
     public static void recordHit(MonsterForLiftEntity mfl, PlayerEntity attacker) {
         if (mfl == null || attacker == null || mfl.getWorld().isClient) return;
         if (!(attacker instanceof ServerPlayerEntity player)) return;
-        if (player.interactionManager == null || !player.interactionManager.getGameMode().isSurvivalLike()) return;
+        if (player.interactionManager == null || player.interactionManager.getGameMode() != GameMode.ADVENTURE) return;
         if (CheckpointManager.isGameRunning(player.getServer())) return;
         if (mfl.isHuntEnabled() || MflTestModeManager.isActive(mfl)) return;
 
