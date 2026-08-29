@@ -5,19 +5,17 @@ import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.entity.ItemEntity;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NbtCompound;
-import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
 import net.minecraft.world.World;
 import ru.fifth.horror.FifthMod;
 import ru.fifth.horror.item.VhsCassetteItem;
-import ru.fifth.horror.video.VideoAssetStore;
-import ru.fifth.horror.video.VideoFeature;
+import ru.fifth.horror.vhs.VhsRecordingFeature;
+import ru.fifth.horror.vhs.VhsRecordingStore;
 
-/** VHS drive: mechanical insert -> validate one complete real media asset -> client cache/static/video playback. */
+/** VHS drive: insert -> validate immutable PNG frame recording -> arm linked TV for manual browsing. */
 public final class CassetteDriveBlockEntity extends BlockEntity {
     public static final int INSERT_TICKS = 30;
     public static final int FAIL_TICKS = 46;
@@ -46,10 +44,15 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
         reject = VhsCassetteItem.recording(cassette).isBlank();
         markDirty();
         sync();
-        if (world instanceof ServerWorld sw) sw.playSound(null, pos, SoundEvents.BLOCK_DISPENSER_DISPENSE, SoundCategory.BLOCKS, .75f, .65f);
+        if (world instanceof ServerWorld sw) {
+            sw.playSound(null, pos, SoundEvents.BLOCK_DISPENSER_DISPENSE, SoundCategory.BLOCKS, .75f, .65f);
+        }
     }
 
     public ItemStack ejectNow() {
+        if (world instanceof ServerWorld sw && tvPos != null && sw.getBlockEntity(tvPos) instanceof TelevisionBlockEntity tv) {
+            tv.stop();
+        }
         ItemStack out = cassette;
         cassette = ItemStack.EMPTY;
         timer = 0;
@@ -70,26 +73,19 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
 
         if (be.phase == 1) {
             String rec = VhsCassetteItem.recording(be.cassette);
-            VideoAssetStore store = VideoFeature.store(sw.getServer());
-            boolean legacy = !rec.isBlank() && store.isLegacyOnly(rec);
-            boolean invalid = be.reject || rec.isBlank() || !store.isComplete(rec) || !be.hasValidTv(sw);
+            boolean invalid = be.reject || rec.isBlank()
+                    || !VhsRecordingFeature.store(sw.getServer()).isComplete(rec)
+                    || !be.hasValidTv(sw);
             if (invalid) {
                 be.reject = true;
                 be.phase = 2;
                 be.timer = FAIL_TICKS;
-                if (be.tvPos != null) {
-                    String reason = legacy ? "LEGACY VHS: перезапишите кассету" : "TAPE READ ERROR: реальное видео не найдено";
-                    Box nearby = new Box(be.tvPos).expand(64);
-                    for (ServerPlayerEntity player : sw.getEntitiesByClass(ServerPlayerEntity.class, nearby, p -> true)) {
-                        VideoFeature.sendPlaybackError(player, be.tvPos, reason);
-                    }
-                }
                 sw.playSound(null, pos, SoundEvents.BLOCK_NOTE_BLOCK_HAT.value(), SoundCategory.BLOCKS, .75f, .42f);
                 be.sync();
                 return;
             }
             be.phase = 0;
-            be.startPlayback(sw, rec);
+            be.armTelevision(sw, rec);
             be.sync();
             return;
         }
@@ -112,10 +108,10 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
         return tvPos != null && sw.getBlockEntity(tvPos) instanceof TelevisionBlockEntity;
     }
 
-    private void startPlayback(ServerWorld sw, String rec) {
+    private void armTelevision(ServerWorld sw, String rec) {
         if (tvPos == null || !(sw.getBlockEntity(tvPos) instanceof TelevisionBlockEntity tv)) return;
-        VideoAssetStore.Metadata metadata = VideoFeature.store(sw.getServer()).metadata(rec);
-        if (metadata == null || !VideoFeature.store(sw.getServer()).isComplete(rec)) {
+        VhsRecordingStore.Metadata metadata = VhsRecordingFeature.store(sw.getServer()).metadata(rec);
+        if (metadata == null) {
             reject = true;
             phase = 2;
             timer = FAIL_TICKS;
@@ -124,11 +120,8 @@ public final class CassetteDriveBlockEntity extends BlockEntity {
         }
 
         tv.start(rec);
-        Box box = new Box(tvPos).expand(64);
-        for (ServerPlayerEntity player : sw.getEntitiesByClass(ServerPlayerEntity.class, box, p -> true)) {
-            VideoFeature.sendPlaybackStart(player, tvPos, metadata);
-        }
-        // Signal-lock noise starts client-side only after that client has the full verified media file.
+        sw.playSound(null, tvPos, SoundEvents.BLOCK_FIRE_AMBIENT, SoundCategory.BLOCKS, .72f, .62f);
+        sw.playSound(null, tvPos, SoundEvents.BLOCK_NOTE_BLOCK_HAT.value(), SoundCategory.BLOCKS, .32f, .48f);
         markDirty();
         sync();
     }
