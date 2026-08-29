@@ -17,14 +17,16 @@
       "ru.fifth.horror.lift.LiftBindingFeature",
       "ru.fifth.horror.CheckpointFeature",
       "ru.fifth.horror.vhs.VhsRecordingFeature",
-      "ru.fifth.horror.video.VideoFeature"
+      "ru.fifth.horror.video.VideoFeature",
+      "ru.fifth.horror.cabinet.CabinetFeature"
     ],
     "client": [
       "ru.fifth.horror.client.FifthClient",
       "ru.fifth.horror.client.TriggerZoneVisualizationClient",
       "ru.fifth.horror.client.LiftBindingClient",
       "ru.fifth.horror.client.DeathSequenceClientFeature",
-      "ru.fifth.horror.client.VhsRecordingClient"
+      "ru.fifth.horror.client.VhsRecordingClient",
+      "ru.fifth.horror.client.CabinetClient"
     ]
   },
   "mixins": ["fifth.mixins.json"],

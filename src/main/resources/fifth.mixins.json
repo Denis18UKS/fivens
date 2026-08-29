@@ -10,7 +10,7 @@
     "MonsterForLiftRuntimeMixin",
     "MonsterForLiftDeathMixin",
     "MonsterForLiftCaptureGateMixin",
-    "MonsterForLiftAggressionMixin"
+    "MonsterForLiftAttackMixin"
   ],
   "client": [
     "TitleScreenMixin",
