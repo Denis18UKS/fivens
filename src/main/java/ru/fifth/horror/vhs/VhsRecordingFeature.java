@@ -23,13 +23,14 @@ import java.util.UUID;
 import java.util.WeakHashMap;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Server half of the real stored-frame VHS recorder/playback protocol. */
+/** Server half of the immutable stored-frame VHS recorder/viewer protocol. */
 public final class VhsRecordingFeature implements ModInitializer {
     public static final Identifier RECORD_BEGIN = FifthMod.id("vhs_record_begin");
     public static final Identifier RECORD_FRAME = FifthMod.id("vhs_record_frame");
     public static final Identifier RECORD_FINISH = FifthMod.id("vhs_record_finish");
     public static final Identifier RECORD_ACK = FifthMod.id("vhs_record_ack");
     public static final Identifier PLAYBACK_START = FifthMod.id("vhs_playback_start");
+    public static final Identifier VIEWER_OPEN = FifthMod.id("vhs_viewer_open");
     public static final Identifier FRAME_REQUEST = FifthMod.id("vhs_frame_request");
     public static final Identifier FRAME_DATA = FifthMod.id("vhs_frame_data");
     public static final Identifier PLAYBACK_ERROR = FifthMod.id("vhs_playback_error");
@@ -128,7 +129,17 @@ public final class VhsRecordingFeature implements ModInitializer {
         });
     }
 
+    /** Compatibility hook for older callers that only need the stored-frame session. */
     public static void sendPlaybackStart(ServerPlayerEntity player, BlockPos tvPos, VhsRecordingStore.Metadata metadata) {
+        sendSession(player, tvPos, metadata, PLAYBACK_START);
+    }
+
+    /** Opens the interactive frame viewer only for the player who clicked this television. */
+    public static void sendViewerOpen(ServerPlayerEntity player, BlockPos tvPos, VhsRecordingStore.Metadata metadata) {
+        sendSession(player, tvPos, metadata, VIEWER_OPEN);
+    }
+
+    private static void sendSession(ServerPlayerEntity player, BlockPos tvPos, VhsRecordingStore.Metadata metadata, Identifier channel) {
         if (player == null || tvPos == null || metadata == null) return;
         PLAYBACK_ALLOWED.computeIfAbsent(player.getUuid(), ignored -> ConcurrentHashMap.newKeySet()).add(metadata.id());
         PacketByteBuf out = PacketByteBufs.create();
@@ -139,7 +150,7 @@ public final class VhsRecordingFeature implements ModInitializer {
         out.writeVarInt(metadata.frameCount());
         out.writeVarInt(metadata.durationTicks());
         out.writeBlockPos(tvPos);
-        ServerPlayNetworking.send(player, PLAYBACK_START, out);
+        ServerPlayNetworking.send(player, channel, out);
     }
 
     public static void sendPlaybackError(ServerPlayerEntity player, BlockPos tvPos, String message) {
