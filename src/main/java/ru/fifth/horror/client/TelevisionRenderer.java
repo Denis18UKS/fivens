@@ -9,23 +9,32 @@ import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.render.block.entity.BlockEntityRenderer;
 import net.minecraft.client.render.block.entity.BlockEntityRendererFactory;
 import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.RotationAxis;
 import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import ru.fifth.horror.block.TelevisionBlock;
 import ru.fifth.horror.block.TelevisionBlockEntity;
+import ru.fifth.horror.client.video.VideoPlaybackManager;
+import ru.fifth.horror.video.VideoPlaybackPolicy;
 
-import java.util.Random;
+import java.util.HashMap;
+import java.util.Map;
 
-/** Physical CRT overlay renderer used by the normal BER and the dispatcher mixin. */
+/** Physical CRT overlay. Normal VHS sessions consume one cached encoded media file decoded by FFmpeg. */
 public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionBlockEntity> {
     private static final float SCREEN_HALF = 7.0f / 16.0f;
+    private static final double SCREEN_EPSILON = 0.012;
     private static final int SCREEN_LIGHT = 0x00F000F0;
+    private static final Map<Long, Long> DISPATCH_HITS = new HashMap<>();
 
     public TelevisionRenderer(BlockEntityRendererFactory.Context ignored) {}
+
+    public static void noteDispatcherHit(TelevisionBlockEntity be) {
+        if (be != null) DISPATCH_HITS.put(be.getPos().asLong(), System.nanoTime());
+    }
 
     @Override
     public void render(TelevisionBlockEntity be, float delta, MatrixStack ms, VertexConsumerProvider vertices, int light, int overlay) {
@@ -34,8 +43,10 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
 
     public static void renderScreen(TelevisionBlockEntity be, float delta, MatrixStack ms, VertexConsumerProvider vertices) {
         if (be == null || VhsWorldCapture.isCapturing()) return;
-        VhsPlayback.Session session = VhsPlayback.session(be.getPos());
-        if (be.getRecording().isBlank() && be.getStaticTicks() <= 0 && session == null) return;
+        BlockPos pos = be.getPos();
+        boolean realSession = VideoPlaybackManager.hasSession(pos);
+        boolean diagnosticSession = VhsRecordedPlayback.hasSession(pos);
+        if (be.getRecording().isBlank() && be.getStaticTicks() <= 0 && !realSession && !diagnosticSession) return;
 
         TextRenderer text = MinecraftClient.getInstance().textRenderer;
         Direction facing = be.getCachedState().contains(TelevisionBlock.FACING)
@@ -44,9 +55,42 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         ms.push();
         orientToPhysicalFront(ms, facing);
 
-        boolean startupStatic = session != null ? session.staticPhase() : be.getStaticTicks() > 0;
-        Identifier captured = session == null ? null : VhsWorldCapture.texture(be.getPos());
-        if (!startupStatic && captured != null) drawVideoQuad(ms, vertices, captured, SCREEN_LIGHT);
+        boolean startupStatic;
+        String tapeError;
+        boolean videoPhase;
+        boolean preparing = false;
+        Identifier videoTexture;
+        String label;
+
+        if (realSession) {
+            VideoPlaybackPolicy.State state = VideoPlaybackManager.state(pos);
+            startupStatic = VideoPlaybackManager.staticPhase(pos);
+            tapeError = VideoPlaybackManager.error(pos);
+            videoPhase = VideoPlaybackManager.playing(pos);
+            preparing = state == VideoPlaybackPolicy.State.PREPARING;
+            videoTexture = videoPhase && tapeError.isBlank() ? VideoPlaybackManager.texture(pos) : null;
+            label = VideoPlaybackManager.label(pos);
+        } else if (diagnosticSession) {
+            startupStatic = VhsRecordedPlayback.staticPhase(pos);
+            tapeError = VhsRecordedPlayback.error(pos);
+            videoPhase = VhsRecordedPlayback.recordingPhase(pos);
+            videoTexture = videoPhase && tapeError.isBlank() ? VhsRecordedPlayback.texture(pos) : null;
+            label = VhsRecordedPlayback.label(pos);
+        } else {
+            startupStatic = be.getStaticTicks() > 0;
+            tapeError = "";
+            videoPhase = false;
+            videoTexture = null;
+            label = be.getRecording();
+        }
+
+        if (startupStatic) {
+            long tick = be.getWorld() == null ? 0L : be.getWorld().getTime();
+            Identifier signal = VhsSignalTexture.texture(pos, tick);
+            if (signal != null) drawVideoQuad(ms, vertices, signal, SCREEN_LIGHT);
+        } else if (videoTexture != null) {
+            drawVideoQuad(ms, vertices, videoTexture, SCREEN_LIGHT);
+        }
 
         float overlayScale = (SCREEN_HALF * 2.0f) / 108.0f;
         ms.scale(overlayScale, -overlayScale, overlayScale);
@@ -55,47 +99,36 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
         int y = -43;
 
         if (startupStatic) {
-            drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
-            long seed = (be.getWorld() == null ? 0 : be.getWorld().getTime()) * 31L + be.getPos().asLong();
-            Random r = new Random(seed);
-            String chars = " ░▒▓";
-            for (int row = 0; row < 12; row++) {
-                StringBuilder line = new StringBuilder();
-                for (int col = 0; col < 18; col++) line.append(chars.charAt(r.nextInt(chars.length())));
-                int g = 80 + r.nextInt(145);
-                int grey = 0xFF000000 | (g << 16) | (g << 8) | g;
-                text.draw(line.toString(), x, y + 4 + row * 7, grey, false, matrix, vertices,
-                        TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
-            }
-            text.draw("VHS TRACKING...", -39, -4, 0xFFF0F0F0, false, matrix, vertices,
+            text.draw("VHS TRACKING...", -39, -4, 0xFFF4F4F4, false, matrix, vertices,
                     TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
-        } else if (session != null) {
-            if (captured == null) {
-                // Never fake the recording with more static. Static belongs only to cassette startup.
-                // This text normally appears for at most the first capture frame; persistent appearance means the
-                // secondary-camera renderer logged a real error to latest.log under [Fiven/VHS].
+        } else if (!tapeError.isBlank()) {
+            drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
+            text.draw("TAPE READ ERROR", -42, -4, 0xFFFFB8B8, false, matrix, vertices,
+                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
+        } else if (preparing) {
+            drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
+            text.draw("LOADING TAPE...", -39, -4, 0xFFE6E6E6, false, matrix, vertices,
+                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
+        } else if (videoPhase) {
+            if (videoTexture == null) {
                 drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
                 text.draw("VIDEO BUFFERING", -39, -4, 0xFFE6E6E6, false, matrix, vertices,
                         TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             } else {
                 for (int row = 0; row < 12; row += 2) {
-                    text.draw("──────────────────", x, y + 4 + row * 7, 0x55000000, false, matrix, vertices,
+                    text.draw("──────────────────", x, y + 4 + row * 7, 0x22000000, false, matrix, vertices,
                             TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
                 }
             }
-
-            text.draw("REC", x + 2, y + 2, 0xFFF2F2F2, false, matrix, vertices,
+            text.draw("PLAY", x + 2, y + 2, 0xFFF2F2F2, false, matrix, vertices,
                     TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
-            String sub = session.subtitle();
-            if (!sub.isBlank()) {
-                String clipped = sub.length() > 25 ? sub.substring(0, 25) : sub;
-                text.draw(Text.literal(clipped), x + 2, y + 76, 0xFFF0F0F0, false, matrix, vertices,
+            if (label != null && !label.isBlank()) {
+                String clipped = label.length() > 20 ? label.substring(0, 20) : label;
+                text.draw(clipped, x + 2, y + 76, 0xFFDDDDDD, false, matrix, vertices,
                         TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
             }
         } else {
             drawBlack(text, matrix, vertices, SCREEN_LIGHT, x, y);
-            text.draw("WAITING FOR VHS", x + 4, -4, 0xFFE0E0E0, false, matrix, vertices,
-                    TextRenderer.TextLayerType.POLYGON_OFFSET, 0, SCREEN_LIGHT);
         }
         ms.pop();
     }
@@ -103,18 +136,18 @@ public final class TelevisionRenderer implements BlockEntityRenderer<TelevisionB
     private static void orientToPhysicalFront(MatrixStack ms, Direction facing) {
         switch (facing) {
             case SOUTH -> {
-                ms.translate(.5, .5, 1.0015);
+                ms.translate(.5, .5, 1.0 + SCREEN_EPSILON);
                 ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(180f));
             }
             case EAST -> {
-                ms.translate(1.0015, .5, .5);
+                ms.translate(1.0 + SCREEN_EPSILON, .5, .5);
                 ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(-90f));
             }
             case WEST -> {
-                ms.translate(-.0015, .5, .5);
+                ms.translate(-SCREEN_EPSILON, .5, .5);
                 ms.multiply(RotationAxis.POSITIVE_Y.rotationDegrees(90f));
             }
-            default -> ms.translate(.5, .5, -.0015);
+            default -> ms.translate(.5, .5, -SCREEN_EPSILON);
         }
     }
 

@@ -1,6 +1,5 @@
 package ru.fifth.horror;
 
-import com.google.gson.Gson;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
@@ -13,13 +12,10 @@ import net.minecraft.text.Text;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import ru.fifth.horror.block.TelevisionBlockEntity;
-import ru.fifth.horror.cutscene.CutsceneDefinition;
-import ru.fifth.horror.network.FifthNetworking;
+import ru.fifth.horror.vhs.VhsRecordingFeature;
 
-/** Director-only TV diagnostic that bypasses cassette/link logic and tests the physical CRT render path directly. */
+/** Director-only diagnostic for the physical CRT render path. */
 public final class TvTestCommands implements ModInitializer {
-    private static final Gson GSON = new Gson();
-
     @Override
     public void onInitialize() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> dispatcher.register(
@@ -46,24 +42,11 @@ public final class TvTestCommands implements ModInitializer {
             return 0;
         }
 
-        CutsceneDefinition scene = new CutsceneDefinition();
-        scene.id = "__tv_render_test__";
-        scene.hideHud = false;
-        scene.lockInput = false;
-        scene.teleportPlayerAtEnd = false;
-        CutsceneDefinition.Keyframe frame = new CutsceneDefinition.Keyframe(
-                player.getX(), player.getEyeY(), player.getZ(),
-                player.getYaw(), player.getPitch(), 70.0, 120);
-        frame.subtitle = "TV MIXIN TEST";
-        scene.keyframes.add(frame);
-
-        tv.start(scene.id);
+        tv.start("__tv_diagnostic__");
         PacketByteBuf out = PacketByteBufs.create();
-        out.writeString(GSON.toJson(scene), 1_000_000);
-        out.writeVarInt(1);
         out.writeBlockPos(tv.getPos());
-        ServerPlayNetworking.send(player, FifthNetworking.VHS_PLAYBACK, out);
-        source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §aTV TEST запущен§7: 4 секунды шума, затем камера игрока на физическом экране TV."), false);
+        ServerPlayNetworking.send(player, VhsRecordingFeature.TV_DIAGNOSTIC, out);
+        source.sendFeedback(() -> Text.literal("§8[§cFiven§8] §aTV TEST: §71.5 сек помех, затем тест-карта CRT."), false);
         return 1;
     }
 }
