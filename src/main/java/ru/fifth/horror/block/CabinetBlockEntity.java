@@ -47,6 +47,7 @@ public final class CabinetBlockEntity extends BlockEntity implements GeoBlockEnt
 
     public static void tickServer(net.minecraft.world.World world, BlockPos pos, BlockState state, CabinetBlockEntity cabinet) {
         if (!(world instanceof ServerWorld serverWorld)) return;
+        if (cabinet.occupant != null) CabinetFeature.registerLoaded(cabinet);
         if (cabinet.soundCloseTicks > 0 && --cabinet.soundCloseTicks == 0) {
             serverWorld.playSound(null, pos, SoundEvents.BLOCK_CHEST_CLOSE, SoundCategory.BLOCKS, 0.9f, 0.9f);
         }
@@ -79,11 +80,6 @@ public final class CabinetBlockEntity extends BlockEntity implements GeoBlockEnt
 
     @Override public BlockEntityUpdateS2CPacket toUpdatePacket() { return BlockEntityUpdateS2CPacket.create(this); }
     @Override public NbtCompound toInitialChunkDataNbt() { return createNbt(); }
-
-    @Override public void onLoad() {
-        super.onLoad();
-        if (world != null && !world.isClient) CabinetFeature.registerLoaded(this);
-    }
 
     @Override public void markRemoved() {
         CabinetFeature.unregister(this);
