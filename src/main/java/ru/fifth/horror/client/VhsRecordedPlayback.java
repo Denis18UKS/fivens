@@ -8,15 +8,15 @@ import net.minecraft.client.texture.NativeImageBackedTexture;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
+import ru.fifth.horror.vhs.VhsFrameNavigationPolicy;
 import ru.fifth.horror.vhs.VhsRecordingFeature;
 import ru.fifth.horror.vhs.VhsRecordingPolicy;
 
 import java.util.HashMap;
 import java.util.Map;
 
-/** Plays immutable PNG frames recorded during authoring; never renders the live world. */
+/** Client cache/texture bridge for immutable PNG VHS frames. Navigation is manual, never timed like video. */
 public final class VhsRecordedPlayback {
-    public static final int STATIC_TICKS = 30;
     private static final Map<Long, Session> SESSIONS = new HashMap<>();
     private static final Map<String, FrameCache> CACHE = new HashMap<>();
 
@@ -32,14 +32,13 @@ public final class VhsRecordedPlayback {
             cache = new FrameCache(recordingId, width, height, fps, frameCount);
             CACHE.put(recordingId, cache);
         }
-        Session old = SESSIONS.put(tvPos.asLong(), new Session(tvPos.toImmutable(), cache, Math.max(1, durationTicks)));
+        Session old = SESSIONS.put(tvPos.asLong(), new Session(tvPos.toImmutable(), cache));
         if (old != null) old.closeTextureOnly();
+        Session session = SESSIONS.get(tvPos.asLong());
+        if (session != null) session.prefetch();
     }
 
-    /**
-     * Creates a local one-frame checker/test card. This verifies the physical CRT plane/mixin without
-     * depending on cassette metadata, server frame storage or a live secondary world render.
-     */
+    /** One-frame test card for /fiven tv test. */
     public static void startDiagnostic(BlockPos tvPos) {
         if (tvPos == null) return;
         String id = "__tv_diagnostic__";
@@ -68,7 +67,7 @@ public final class VhsRecordedPlayback {
                 return;
             }
         }
-        Session old = SESSIONS.put(tvPos.asLong(), new Session(tvPos.toImmutable(), cache, 120));
+        Session old = SESSIONS.put(tvPos.asLong(), new Session(tvPos.toImmutable(), cache));
         if (old != null) old.closeTextureOnly();
     }
 
@@ -88,16 +87,9 @@ public final class VhsRecordedPlayback {
         if (session != null) session.error = text;
     }
 
+    /** Keeps only the current frame and immediate neighbours warm. There is no playback clock. */
     public static void tick() {
-        var it = SESSIONS.entrySet().iterator();
-        while (it.hasNext()) {
-            Session session = it.next().getValue();
-            session.tick();
-            if (session.finished()) {
-                session.closeTextureOnly();
-                it.remove();
-            }
-        }
+        for (Session session : SESSIONS.values()) session.prefetch();
     }
 
     public static boolean hasSession(BlockPos pos) {
@@ -105,13 +97,12 @@ public final class VhsRecordedPlayback {
     }
 
     public static boolean staticPhase(BlockPos pos) {
-        Session session = pos == null ? null : SESSIONS.get(pos.asLong());
-        return session != null && session.ticks < STATIC_TICKS;
+        return false;
     }
 
     public static boolean recordingPhase(BlockPos pos) {
         Session session = pos == null ? null : SESSIONS.get(pos.asLong());
-        return session != null && session.ticks >= STATIC_TICKS && session.ticks < STATIC_TICKS + session.durationTicks;
+        return session != null && session.error.isBlank();
     }
 
     public static String error(BlockPos pos) {
@@ -121,15 +112,52 @@ public final class VhsRecordedPlayback {
 
     public static Identifier texture(BlockPos pos) {
         Session session = pos == null ? null : SESSIONS.get(pos.asLong());
-        if (session == null || !recordingPhase(pos) || !session.error.isBlank()) return null;
-        int localTick = Math.max(0, session.ticks - STATIC_TICKS);
-        int frameIndex = VhsRecordingPolicy.frameIndexForTick(localTick, session.cache.fps, session.cache.frameCount);
-        return session.install(frameIndex);
+        if (session == null || !session.error.isBlank()) return null;
+        return session.install(session.currentFrame);
+    }
+
+    public static void step(BlockPos pos, int delta) {
+        Session session = pos == null ? null : SESSIONS.get(pos.asLong());
+        if (session == null || session.cache.frameCount <= 0) return;
+        session.currentFrame = VhsFrameNavigationPolicy.move(session.currentFrame, delta, session.cache.frameCount);
+        session.prefetch();
+    }
+
+    public static int currentFrame(BlockPos pos) {
+        Session session = pos == null ? null : SESSIONS.get(pos.asLong());
+        return session == null ? 0 : session.currentFrame;
+    }
+
+    public static int frameCount(BlockPos pos) {
+        Session session = pos == null ? null : SESSIONS.get(pos.asLong());
+        return session == null ? 0 : session.cache.frameCount;
+    }
+
+    public static int width(BlockPos pos) {
+        Session session = pos == null ? null : SESSIONS.get(pos.asLong());
+        return session == null ? 0 : session.cache.width;
+    }
+
+    public static int height(BlockPos pos) {
+        Session session = pos == null ? null : SESSIONS.get(pos.asLong());
+        return session == null ? 0 : session.cache.height;
+    }
+
+    public static boolean frameReady(BlockPos pos) {
+        Session session = pos == null ? null : SESSIONS.get(pos.asLong());
+        return session != null && session.currentFrame >= 0 && session.currentFrame < session.cache.frameCount
+                && session.cache.frames[session.currentFrame] != null;
     }
 
     public static String label(BlockPos pos) {
         Session session = pos == null ? null : SESSIONS.get(pos.asLong());
         return session == null ? "" : session.cache.id;
+    }
+
+    public static void closeSession(BlockPos pos) {
+        if (pos == null) return;
+        Session session = SESSIONS.remove(pos.asLong());
+        if (session != null) session.closeTextureOnly();
     }
 
     public static void clear() {
@@ -142,31 +170,21 @@ public final class VhsRecordedPlayback {
     private static final class Session {
         private final BlockPos tvPos;
         private final FrameCache cache;
-        private final int durationTicks;
-        private int ticks;
-        private int staticPrefetch;
+        private int currentFrame;
         private String error = "";
         private NativeImageBackedTexture texture;
         private Identifier textureId;
         private int installedFrame = -1;
 
-        private Session(BlockPos tvPos, FrameCache cache, int durationTicks) {
+        private Session(BlockPos tvPos, FrameCache cache) {
             this.tvPos = tvPos;
             this.cache = cache;
-            this.durationTicks = durationTicks;
         }
 
-        private void tick() {
-            if (ticks < STATIC_TICKS) {
-                request(staticPrefetch++);
-            } else if (ticks < STATIC_TICKS + durationTicks && error.isBlank()) {
-                int localTick = ticks - STATIC_TICKS;
-                int current = VhsRecordingPolicy.frameIndexForTick(localTick, cache.fps, cache.frameCount);
-                request(current);
-                request(current + 1);
-                request(current + 2);
-            }
-            ticks++;
+        private void prefetch() {
+            request(currentFrame);
+            request(currentFrame - 1);
+            request(currentFrame + 1);
         }
 
         private void request(int index) {
@@ -184,7 +202,7 @@ public final class VhsRecordedPlayback {
             byte[] png = cache.frames[frameIndex];
             if (png == null) {
                 request(frameIndex);
-                return textureId;
+                return installedFrame >= 0 ? textureId : null;
             }
             if (frameIndex == installedFrame && textureId != null) return textureId;
             try (NativeImage decoded = NativeImage.read(png)) {
@@ -212,15 +230,12 @@ public final class VhsRecordedPlayback {
             }
         }
 
-        private boolean finished() {
-            return ticks >= STATIC_TICKS + durationTicks + 10;
-        }
-
         private void closeTextureOnly() {
             if (texture != null) {
                 try { texture.close(); } catch (Throwable ignored) {}
                 texture = null;
                 textureId = null;
+                installedFrame = -1;
             }
         }
     }
