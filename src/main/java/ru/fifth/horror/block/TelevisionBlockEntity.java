@@ -15,8 +15,9 @@ public final class TelevisionBlockEntity extends BlockEntity {
     private int quality=1;
     private float noise=.65f; private boolean monochrome=true;
     public TelevisionBlockEntity(BlockPos p,BlockState s){super(FifthMod.TELEVISION_BE,p,s);}
-    /** Static is only the 1.5s cassette lock-on/startup phase. */
+    /** Brief insertion/static phase before the recording is ready to browse. */
     public void start(String id){recording=id==null?"":id;staticTicks=30;markDirty();sync();}
+    public void stop(){recording="";staticTicks=0;markDirty();sync();}
     public String getRecording(){return recording;} public int getStaticTicks(){return staticTicks;} public int getQuality(){return quality;} public float getNoise(){return noise;} public boolean isMonochrome(){return monochrome;}
     public void configure(int quality,float noise,boolean mono){this.quality=Math.max(0,Math.min(3,quality));this.noise=Math.max(0,Math.min(1,noise));monochrome=mono;markDirty();sync();}
     public static void tickClient(net.minecraft.world.World w,BlockPos p,BlockState s,TelevisionBlockEntity be){if(be.staticTicks>0)be.staticTicks--;}
