@@ -1,29 +1,22 @@
 package ru.fifth.horror.client;
 
 import com.google.gson.Gson;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.fabricmc.fabric.api.networking.v1.PacketByteBufs;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.texture.NativeImage;
+import net.minecraft.network.PacketByteBuf;
 import net.minecraft.text.Text;
-import org.bytedeco.ffmpeg.global.avcodec;
-import org.bytedeco.ffmpeg.global.avutil;
-import org.bytedeco.javacv.FFmpegFrameRecorder;
-import org.bytedeco.javacv.Java2DFrameConverter;
-import ru.fifth.horror.client.video.VideoInspector;
-import ru.fifth.horror.client.video.VideoNativeRuntime;
-import ru.fifth.horror.client.video.VideoUploadClient;
 import ru.fifth.horror.cutscene.CutsceneDefinition;
-import ru.fifth.horror.video.VideoAssetPolicy;
-import ru.fifth.horror.video.VideoAssetStore;
+import ru.fifth.horror.vhs.VhsRecordingFeature;
+import ru.fifth.horror.vhs.VhsRecordingPolicy;
+import ru.fifth.horror.vhs.VhsRecordingStore;
 
-import java.awt.image.BufferedImage;
-import java.nio.file.Files;
-import java.nio.file.Path;
-
-/** Authoring-only recorder that turns a saved Fiven camera cutscene into one real MP4 file. */
+/** Explicit authoring-only recorder. Captures the saved camera timeline as immutable PNG frames. */
 public final class VhsRecorderClient {
-    public static final int WIDTH = 640;
-    public static final int HEIGHT = 360;
-    public static final int FPS = 30;
+    public static final int WIDTH = 256;
+    public static final int HEIGHT = 144;
+    public static final int FPS = 15;
     private static final Gson GSON = new Gson();
 
     private static CutsceneDefinition scene;
@@ -31,25 +24,21 @@ public final class VhsRecorderClient {
     private static int durationTicks;
     private static int frameCount;
     private static int frameIndex;
-    private static FFmpegFrameRecorder recorder;
-    private static Java2DFrameConverter converter;
-    private static Path output;
+    private static int elapsedTicks;
+    private static boolean waitingBegin;
     private static boolean recording;
+    private static boolean waitingFinish;
 
     private VhsRecorderClient() {}
 
     public static boolean start(CutsceneDefinition source) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (source == null || source.keyframes.isEmpty() || client.player == null || client.world == null) {
-            message("§cНельзя записать видео: нет мира или ключевых кадров.");
+            message("§cНельзя записать VHS: нет мира или ключевых кадров.");
             return false;
         }
-        if (recording || VideoUploadClient.active()) {
-            message("§eЗапись/загрузка видео уже выполняется.");
-            return false;
-        }
-        if (!VideoNativeRuntime.available()) {
-            message("§c" + VideoNativeRuntime.failureMessage());
+        if (waitingBegin || recording || waitingFinish) {
+            message("§eЗапись VHS уже выполняется.");
             return false;
         }
 
@@ -57,146 +46,142 @@ public final class VhsRecorderClient {
         int total = 0;
         for (CutsceneDefinition.Keyframe keyframe : copy.keyframes) total += Math.max(1, keyframe.durationTicks);
         long frames = Math.max(1L, (total * (long) FPS + 19L) / 20L);
-        if (frames > 108_000L) {
-            message("§cКатсцена слишком длинная для одной VHS-записи.");
+        if (frames > VhsRecordingPolicy.MAX_FRAMES) {
+            message("§cVHS слишком длинная: максимум " + VhsRecordingPolicy.MAX_FRAMES + " кадров.");
             return false;
         }
 
-        try {
-            scene = copy;
-            recordingId = VideoAssetPolicy.safeId(copy.id);
-            durationTicks = Math.max(1, total);
-            frameCount = (int) frames;
-            frameIndex = 0;
+        scene = copy;
+        recordingId = VhsRecordingStore.safeId(copy.id);
+        durationTicks = Math.max(1, total);
+        frameCount = (int) frames;
+        frameIndex = 0;
+        elapsedTicks = 0;
+        waitingBegin = true;
+        recording = false;
+        waitingFinish = false;
 
-            Path tempDir = client.runDirectory.toPath().resolve("fiven").resolve("video-temp");
-            Files.createDirectories(tempDir);
-            output = tempDir.resolve(recordingId + "-" + System.currentTimeMillis() + ".mp4");
+        PacketByteBuf out = PacketByteBufs.create();
+        out.writeString(recordingId, 128);
+        out.writeVarInt(WIDTH);
+        out.writeVarInt(HEIGHT);
+        out.writeVarInt(FPS);
+        out.writeVarInt(frameCount);
+        out.writeVarInt(durationTicks);
+        ClientPlayNetworking.send(VhsRecordingFeature.RECORD_BEGIN, out);
+        client.setScreen(null);
+        message("§7Подготовка покадровой VHS §f" + recordingId + "§7...");
+        return true;
+    }
 
-            recorder = new FFmpegFrameRecorder(output.toFile(), WIDTH, HEIGHT, 0);
-            recorder.setFormat("mp4");
-            recorder.setVideoCodec(avcodec.AV_CODEC_ID_H264);
-            recorder.setPixelFormat(avutil.AV_PIX_FMT_YUV420P);
-            recorder.setFrameRate(FPS);
-            recorder.setVideoBitrate(2_500_000);
-            recorder.setGopSize(FPS * 2);
-            recorder.start();
-            converter = new Java2DFrameConverter();
+    public static void handleAck(String phase, String id, boolean success, String serverMessage) {
+        if ("begin".equals(phase)) {
+            if (!waitingBegin || !recordingId.equals(id)) return;
+            waitingBegin = false;
+            if (!success) {
+                reset();
+                message("§c" + serverMessage);
+                return;
+            }
+            elapsedTicks = 0;
             recording = true;
-            client.setScreen(null);
-            message("§aЗаписываю MP4... §f0% §7(640×360 / 30 FPS)");
-            message("§8Эта запись катсцены содержит видео без общего Minecraft-аудиомикса.");
-            return true;
-        } catch (Throwable error) {
-            closeRecorder();
-            resetState();
-            message("§cНе удалось запустить MP4-кодировщик: " + concise(error));
-            return false;
+            message("§aПокадровая VHS началась: §f" + recordingId + " §7(" + frameCount + " кадров / 15 FPS)");
+            return;
+        }
+        if ("error".equals(phase)) {
+            if (!recordingId.equals(id)) return;
+            reset();
+            message("§c" + serverMessage);
+            return;
+        }
+        if ("finish".equals(phase)) {
+            if (!waitingFinish || !recordingId.equals(id)) return;
+            String finishedId = recordingId;
+            reset();
+            message((success ? "§a" : "§c") + serverMessage + (success ? " §7[§f" + finishedId + "§7]" : ""));
         }
     }
 
-    /** Called after the normal world frame. One callback encodes one media frame with an explicit timestamp. */
+    /** Called from HudRenderCallback after the normal world pass; captures only when this 15 FPS sample is due. */
     public static void captureNext(float tickDelta) {
-        if (!recording || scene == null || recorder == null) return;
+        if (!recording || scene == null) return;
         if (frameIndex >= frameCount) {
-            finishRecording();
+            finish();
             return;
         }
 
-        double mediaTick = frameIndex * 20.0 / FPS;
-        VhsPlayback.Sample camera = sample(scene, mediaTick);
-        NativeImage nativeImage = VhsWorldCapture.captureFrame(camera, tickDelta);
-        if (nativeImage == null) {
-            fail("Не удалось отрисовать кадр MP4 #" + frameIndex + ".");
+        int sampleTick = (int) Math.min(durationTicks - 1L, frameIndex * 20L / FPS);
+        if (sampleTick > elapsedTicks) return;
+
+        VhsPlayback.Sample sample = sample(scene, sampleTick);
+        NativeImage image = VhsWorldCapture.captureFrame(sample, tickDelta);
+        if (image == null) {
+            failLocal("Не удалось отрисовать кадр VHS #" + frameIndex + ". Смотри latest.log [Fiven/VHS].");
             return;
         }
 
-        try (nativeImage) {
-            BufferedImage buffered = toBufferedImage(nativeImage);
-            recorder.setTimestamp(Math.round(frameIndex * 1_000_000.0 / FPS));
-            recorder.record(converter.convert(buffered));
-            frameIndex++;
-            int percent = Math.min(100, Math.round(frameIndex * 100f / frameCount));
-            if (frameIndex == frameCount || frameIndex == 1 || percent % 10 == 0) {
-                message("§7Записываю MP4... §f" + percent + "% §8(" + frameIndex + "/" + frameCount + ")");
+        try (image) {
+            byte[] png = image.getBytes();
+            if (png.length <= 0 || png.length > VhsRecordingPolicy.MAX_FRAME_BYTES) {
+                failLocal("Кадр VHS #" + frameIndex + " слишком большой: " + png.length + " байт.");
+                return;
             }
-            if (frameIndex >= frameCount) finishRecording();
-        } catch (Throwable error) {
-            fail("Ошибка кодирования MP4: " + concise(error));
+            PacketByteBuf out = PacketByteBufs.create();
+            out.writeString(recordingId, 128);
+            out.writeVarInt(frameIndex);
+            out.writeByteArray(png);
+            ClientPlayNetworking.send(VhsRecordingFeature.RECORD_FRAME, out);
+        } catch (Exception error) {
+            failLocal("Не удалось закодировать кадр VHS #" + frameIndex + ".");
+            return;
         }
+
+        frameIndex++;
+        if (frameIndex == frameCount || frameIndex % Math.max(1, frameCount / 10) == 0) {
+            int percent = Math.min(100, Math.round(frameIndex * 100f / frameCount));
+            message("§7Запись VHS: §f" + percent + "% §8(" + frameIndex + "/" + frameCount + ")");
+        }
+        if (frameIndex >= frameCount) finish();
     }
 
     public static void tick() {
         MinecraftClient client = MinecraftClient.getInstance();
-        if (recording && (client.world == null || client.player == null)) fail("Запись MP4 прервана: выход из мира.");
+        if ((waitingBegin || recording || waitingFinish) && (client.world == null || client.player == null)) {
+            reset();
+            return;
+        }
+        if (recording && elapsedTicks < durationTicks) elapsedTicks++;
     }
 
-    public static boolean active() { return recording; }
+    public static boolean active() {
+        return waitingBegin || recording || waitingFinish;
+    }
 
-    private static void finishRecording() {
+    private static void finish() {
         if (!recording) return;
         recording = false;
-        Path completed = output;
-        String id = recordingId;
-        try {
-            closeRecorder();
-            message("§7MP4 готов, проверяю медиапоток...");
-            VideoAssetStore.Metadata metadata = VideoInspector.inspect(completed, id, VideoAssetStore.Origin.CUTSCENE_RECORDING);
-            resetState();
-            if (!VideoUploadClient.start(completed, metadata)) {
-                message("§cНе удалось начать загрузку готового MP4.");
-            } else {
-                message("§7MP4 готов, загружаю на сервер...");
-            }
-        } catch (Throwable error) {
-            closeRecorder();
-            resetState();
-            message("§cГотовый MP4 не прошёл проверку FFmpeg: " + concise(error));
-        }
+        waitingFinish = true;
+        PacketByteBuf out = PacketByteBufs.create();
+        out.writeString(recordingId, 128);
+        ClientPlayNetworking.send(VhsRecordingFeature.RECORD_FINISH, out);
+        message("§7Финализация покадровой VHS...");
     }
 
-    private static BufferedImage toBufferedImage(NativeImage image) {
-        BufferedImage out = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        for (int y = 0; y < image.getHeight(); y++) {
-            for (int x = 0; x < image.getWidth(); x++) {
-                int abgr = image.getColor(x, y);
-                int a = (abgr >>> 24) & 0xFF;
-                int b = (abgr >>> 16) & 0xFF;
-                int g = (abgr >>> 8) & 0xFF;
-                int r = abgr & 0xFF;
-                out.setRGB(x, y, (a << 24) | (r << 16) | (g << 8) | b);
-            }
-        }
-        return out;
-    }
-
-    private static void fail(String text) {
-        recording = false;
-        closeRecorder();
-        resetState();
+    private static void failLocal(String text) {
+        reset();
         message("§c" + text);
     }
 
-    private static void closeRecorder() {
-        if (recorder != null) {
-            try { recorder.stop(); } catch (Throwable ignored) {}
-            try { recorder.release(); } catch (Throwable ignored) {}
-            recorder = null;
-        }
-        if (converter != null) {
-            try { converter.close(); } catch (Throwable ignored) {}
-            converter = null;
-        }
-    }
-
-    private static void resetState() {
+    private static void reset() {
         scene = null;
         recordingId = "";
         durationTicks = 0;
         frameCount = 0;
         frameIndex = 0;
-        output = null;
+        elapsedTicks = 0;
+        waitingBegin = false;
         recording = false;
+        waitingFinish = false;
     }
 
     private static void message(String text) {
@@ -204,27 +189,22 @@ public final class VhsRecorderClient {
         if (client.player != null) client.player.sendMessage(Text.literal(text), true);
     }
 
-    private static String concise(Throwable error) {
-        String value = error.getMessage();
-        return value == null || value.isBlank() ? error.getClass().getSimpleName() : value;
-    }
-
-    private static VhsPlayback.Sample sample(CutsceneDefinition source, double localTick) {
-        if (source.keyframes.isEmpty()) return new VhsPlayback.Sample(0, 0, 0, 0, 0, 70);
-        double acc = 0;
-        for (int i = 0; i < source.keyframes.size(); i++) {
-            CutsceneDefinition.Keyframe a = source.keyframes.get(i);
-            double duration = Math.max(1, a.durationTicks);
-            if (localTick < acc + duration) {
-                CutsceneDefinition.Keyframe b = i + 1 < source.keyframes.size() ? source.keyframes.get(i + 1) : a;
-                float q = (float) Math.max(0.0, Math.min(1.0, (localTick - acc) / duration));
+    private static VhsPlayback.Sample sample(CutsceneDefinition scene, int localTick) {
+        if (scene.keyframes.isEmpty()) return new VhsPlayback.Sample(0, 0, 0, 0, 0, 70);
+        int acc = 0;
+        for (int i = 0; i < scene.keyframes.size(); i++) {
+            CutsceneDefinition.Keyframe a = scene.keyframes.get(i);
+            int dur = Math.max(1, a.durationTicks);
+            if (localTick < acc + dur) {
+                CutsceneDefinition.Keyframe b = i + 1 < scene.keyframes.size() ? scene.keyframes.get(i + 1) : a;
+                float q = Math.max(0f, Math.min(1f, (localTick - acc) / (float) dur));
                 return new VhsPlayback.Sample(
                         lerp(a.x, b.x, q), lerp(a.y, b.y, q), lerp(a.z, b.z, q),
                         lerpAngle(a.yaw, b.yaw, q), lerpFloat(a.pitch, b.pitch, q), lerp(a.fov, b.fov, q));
             }
-            acc += duration;
+            acc += dur;
         }
-        CutsceneDefinition.Keyframe last = source.keyframes.get(source.keyframes.size() - 1);
+        CutsceneDefinition.Keyframe last = scene.keyframes.get(scene.keyframes.size() - 1);
         return new VhsPlayback.Sample(last.x, last.y, last.z, last.yaw, last.pitch, last.fov);
     }
 
